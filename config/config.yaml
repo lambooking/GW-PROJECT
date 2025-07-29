@@ -1,0 +1,79 @@
+# 系统配置
+system:
+  debug: false
+  log_level: "INFO"
+  max_workers: 4
+  gpu_enabled: true
+
+# 模型配置
+models:
+  text_audit:
+    model_name: "chinese-roberta-wwm-ext"
+    max_length: 512
+    batch_size: 16
+    learning_rate: 2e-5
+    epochs: 10
+    
+  multimodal_audit:
+    vision_model: "chinese-clip-vit-base-patch16"
+    text_model: "chinese-roberta-wwm-ext"
+    fusion_dim: 768
+    dropout: 0.1
+    
+  signature_detection:
+    model_path: "models/signature_detector.pth"
+    confidence_threshold: 0.8
+    
+  layout_analysis:
+    model_path: "models/layout_analyzer.pth"
+    classes: ["text", "image", "table", "title"]
+
+# 审核规则配置
+audit_rules:
+  instruction_book:
+    structure_completeness:
+      required_sections: ["目录", "职责", "作业内容", "相关文件", "记录文件"]
+      scoring_weight: 0.2
+    content_completeness:
+      scoring_weight: 0.4
+    grammar_errors:
+      scoring_weight: 0.05
+    reference_traceability:
+      scoring_weight: 0.1
+    business_logic:
+      scoring_weight: 0.1
+    personnel_configuration:
+      scoring_weight: 0.05
+    emergency_procedures:
+      scoring_weight: 0.05
+    processing_efficiency:
+      scoring_weight: 0.05
+      
+  risk_management:
+    image_recognition:
+      signature_detection: 0.05
+      content_completeness: 0.05
+      annotation_recognition: 0.35
+    context_logic:
+      annotation_consistency: 0.1
+      content_consistency: 0.05
+      standard_compliance: 0.05
+      completeness_check: 0.05
+      time_logic: 0.05
+      data_logic: 0.05
+      template_consistency: 0.1
+    processing_efficiency: 0.05
+
+# 数据处理配置
+data_processing:
+  supported_formats: [".docx", ".pdf", ".doc"]
+  image_formats: [".jpg", ".jpeg", ".png", ".bmp"]
+  max_file_size: 50  # MB
+  ocr_engine: "paddleocr"
+  
+# API配置
+api:
+  host: "0.0.0.0"
+  port: 8000
+  workers: 4
+  timeout: 300
