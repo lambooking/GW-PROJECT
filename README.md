@@ -250,7 +250,7 @@ A: 目前支持：
 
 ## 联系我们
 
-- 项目主页: [GitHub Repository]
+- 项目主页: [dengxianchi]
 - 问题反馈: [Issues]
 - 邮箱: [Contact Email]
 
