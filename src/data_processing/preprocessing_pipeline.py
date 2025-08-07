@@ -70,15 +70,6 @@ class PreprocessingPipeline:
             file_path=path
         )
         
-        # 4. 自动提取并保存分项内容（新增）
-        try:
-            from ..inference.enhanced_content_processor import EnhancedContentProcessor
-            content_processor = EnhancedContentProcessor()
-            extracted_data = content_processor.extract_and_save_all_scoring_contents(standardized_output)
-            logger.info("✅ 分项内容提取和保存完成")
-        except Exception as e:
-            logger.warning(f"⚠️ 分项内容提取失败，但不影响主流程: {e}")
-        
         return standardized_output
 
     def _standardize_output(self, raw_data: Dict[str, Any], classification: Dict[str, Any], file_path: Path) -> StandardizedDocument:

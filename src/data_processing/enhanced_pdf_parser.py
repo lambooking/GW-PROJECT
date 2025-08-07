@@ -107,16 +107,22 @@ class EnhancedPDFParser:
                         'type': section_type,
                         'page_number': page_number,
                         'content': '\n'.join(current_section),
-                        'level': self._get_header_level(line) if section_type == 'header' else 0
+                        'level': self._get_header_level('\n'.join(current_section)) if section_type == 'header' else 0
                     })
                 
-                # 开始新的章节
-                current_section = [line]
-                section_type = 'header'
+                # 保存标题为单独的header
+                structured_text.append({
+                    'type': 'header',
+                    'page_number': page_number,
+                    'content': line,
+                    'level': self._get_header_level(line)
+                })
+                
+                # 开始新的段落
+                current_section = []
+                section_type = 'paragraph'
             else:
                 current_section.append(line)
-                if section_type == 'header':
-                    section_type = 'paragraph'
         
         # 保存最后一个段落
         if current_section:

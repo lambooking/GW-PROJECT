@@ -25,14 +25,15 @@ python -m vllm.entrypoints.openai.api_server \
     --served-model-name qwen2.5-vl-3b \
     --host 0.0.0.0 \
     --port 8000 \
-    --max-model-len 4096 \
+    --max-model-len 8192 \
     --tensor-parallel-size 1 \
     --gpu-memory-utilization 0.9 \
     --max-num-seqs 4 \
     --trust-remote-code \
+    --enable-log-requests \
     --enforce-eager
 
-huggingface-cli download              
-   Qwen/Qwen2.5-VL-7B-Instruct           
-   --local-dir                           
-   ./models/Qwen2.5-VL-7B-Instruct 
+# huggingface-cli download              
+#    openai/gpt-oss-20b           
+#    --local-dir                           
+#    ./models/Qwen2.5-VL-7B-Instruct 

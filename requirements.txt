@@ -46,7 +46,16 @@ jieba>=0.42.1
 
 # HTTP客户端
 requests>=2.28.0
+httpx>=0.24.0  # 现代异步HTTP客户端
+openai>=1.0.0  # OpenAI API客户端
 backoff>=2.1.2  # 指数退避，用于API重试
 
 # 异步支持
-aiofiles>=0.8.0 
+aiofiles>=0.8.0
+
+# 文档处理增强
+pdfplumber>=0.7.0  # PDF表格提取
+
+# RAG系统可选依赖 (建议安装以获得更好性能)
+# chromadb>=0.4.0  # 高性能向量数据库，可选安装: pip install chromadb
+# sentence-transformers>=2.2.0  # 高质量文本嵌入，可选安装: pip install sentence-transformers 
