@@ -1,0 +1,48 @@
+# RAG智能评分系统配置文件
+
+# 系统配置
+system:
+  debug: false
+  log_level: "INFO"
+  max_workers: 4
+  timeout: 120
+  temp_dir: "/tmp/rag_scoring"
+
+# VLLM服务配置
+vllm:
+  host: "localhost"
+  port: 8000
+  model_name: "qwen2.5-vl-3b"
+  api_key: null
+  max_tokens: 2048
+  temperature: 0.1
+  timeout: 60
+
+# 知识库配置
+knowledge_base:
+  storage_type: "chromadb"
+  storage_path: "output/rag_knowledge_base"
+  embedding_model: "all-MiniLM-L6-v2"
+  chunk_size: 1000
+  chunk_overlap: 200
+  collection_name: "documents"
+
+# 文档处理配置
+processing:
+  supported_formats: [".pdf", ".docx", ".doc"]
+  max_file_size_mb: 50
+  ocr_enabled: true
+  image_extraction: true
+  table_extraction: true
+  temp_cleanup: true
+
+# 输出配置
+output:
+  reports_dir: "output/rag_scoring_reports"
+  html_reports_dir: "output/rag_scoring_reports/html"
+  json_reports_dir: "output/rag_scoring_reports"
+  logs_dir: "logs"
+  enable_html_reports: true
+  enable_json_reports: true
+
+# 评分配置 (现有的评分标准将通过代码动态加载)

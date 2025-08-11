@@ -140,3 +140,36 @@ class ScoringPrompts:
                 score = min(int(score_match.group(1)), max_score)
         
         return score, reasoning
+
+class ExtractionPrompts:
+    """
+    信息提取相关的Prompt集合。
+    目前用于从文档中抽取基础元数据（标题、编号、版本、日期、编制单位等）。
+    """
+
+    def get_metadata_prompt(self, context: str) -> str:
+        """
+        生成元数据提取的Prompt，请模型以JSON格式输出可解析结果。
+        """
+        prompt = f"""
+你是一个严谨的文档信息抽取助手。请从以下内容中提取基础元数据，并严格输出JSON：
+
+文档内容：
+{context}
+
+请输出如下JSON对象（不存在则置为null或空字符串）：
+{{
+  "title": string | null,
+  "document_number": string | null,
+  "version": string | null,
+  "date": string | null,            # 格式优先 YYYY-MM-DD
+  "department": string | null,
+  "author": string | null,
+  "reviewer": string | null,
+  "approver": string | null,
+  "keywords": [string]
+}}
+
+只输出JSON，不要附加解释。
+"""
+        return prompt

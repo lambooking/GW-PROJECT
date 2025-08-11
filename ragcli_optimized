@@ -1,0 +1,330 @@
+#!/usr/bin/env python3
+"""
+RAG智能评分系统 - 性能优化版CLI
+解决重构代码的性能问题
+"""
+
+import sys
+import os
+import logging
+from pathlib import Path
+
+# 设置环境变量，避免不必要的网络请求
+os.environ['TRANSFORMERS_OFFLINE'] = '1'
+os.environ['HF_DATASETS_OFFLINE'] = '1'
+
+# 简化日志
+logging.basicConfig(level=logging.WARNING, format='%(levelname)s: %(message)s')
+
+# 添加路径
+sys.path.insert(0, str(Path(__file__).parent / "src"))
+
+import click
+
+def create_fast_app():
+    """创建快速版应用 - 避免性能瓶颈"""
+    
+    # 1. 快速配置加载
+    from src.config.schemas import Config, VLLMConfig, KnowledgeBaseConfig
+    
+    # 使用默认配置，避免复杂的YAML解析
+    config = Config()
+    config.vllm = VLLMConfig(
+        host="localhost",
+        port=8000,
+        model_name="qwen2.5-vl-3b"
+    )
+    config.knowledge_base = KnowledgeBaseConfig(
+        storage_path="output/rag_knowledge_base",
+        embedding_model="all-MiniLM-L6-v2"
+    )
+    
+    # 2. 创建应用
+    from src.core import RAGScoringApplication
+    from src.config import ConfigManager
+    
+    # 模拟配置管理器
+    class FastConfigManager:
+        def __init__(self, config):
+            self._config = config
+            self.vllm = config.vllm
+            self.knowledge_base = config.knowledge_base
+            self.system = config.system
+            self.processing = config.processing
+            self.output = config.output
+    
+    config_manager = FastConfigManager(config)
+    app = RAGScoringApplication(config_manager)
+    
+    return app, config
+
+@click.group()
+@click.option('--verbose', '-v', is_flag=True, help='详细输出')
+@click.option('--base-url', default='http://localhost:8000/v1', show_default=True, help='VLLM服务地址')
+@click.option('--model', default='qwen2.5-vl-3b', show_default=True, help='VLLM模型名')
+@click.pass_context
+def cli(ctx, verbose, base_url, model):
+    """RAG智能评分系统 - 性能优化版"""
+    ctx.ensure_object(dict)
+    ctx.obj['verbose'] = verbose
+    
+    if verbose:
+        logging.basicConfig(level=logging.INFO)
+    ctx.obj['base_url'] = base_url
+    ctx.obj['model'] = model
+
+@cli.command()
+@click.pass_context
+def test(ctx):
+    """快速系统测试"""
+    try:
+        print("🧪 优化版系统测试")
+        print("=" * 40)
+        
+        # 检查基础文件
+        files = [
+            ("配置文件", "config/rag_config.yaml"),
+            ("VLLM客户端", "src/inference/vllm_client.py"),
+            ("知识库", "src/inference/rag_knowledge_base.py"),
+            ("测试文档", "data/raw/场景1(1).pdf")
+        ]
+        
+        for name, path in files:
+            status = "✅" if Path(path).exists() else "❌"
+            print(f"  {status} {name}: {path}")
+        
+        # 测试VLLM连接 (使用原版客户端)
+        print("\n🤖 测试VLLM连接...")
+        try:
+            from src.inference.vllm_client import VLLMInferenceClient
+            client = VLLMInferenceClient(base_url=ctx.obj['base_url'], model_name=ctx.obj['model'])
+            response = client.text_analysis("测试", max_tokens=5)
+            print(f"✅ VLLM连接正常: {str(response)[:30]}...")
+        except Exception as e:
+            print(f"⚠️  VLLM连接失败: {e}")
+        
+        # 测试知识库 (使用原版)
+        print("\n📚 测试知识库...")
+        try:
+            from src.inference.rag_knowledge_base import RAGKnowledgeBase
+            kb = RAGKnowledgeBase()
+            stats = kb.get_stats()
+            print(f"✅ 知识库状态: {stats['total_chunks']} 个文档块")
+        except Exception as e:
+            print(f"⚠️  知识库测试失败: {e}")
+        
+        print("\n🎉 优化版测试完成！")
+        
+    except Exception as e:
+        print(f"❌ 测试失败: {e}")
+        if ctx.obj['verbose']:
+            import traceback
+            traceback.print_exc()
+
+@cli.command()
+@click.argument('file_path', type=click.Path(exists=True))
+@click.pass_context
+def score(ctx, file_path):
+    """快速文档评分"""
+    try:
+        print(f"📄 快速评分: {file_path}")
+        print("=" * 50)
+        
+        # 直接使用原版组件避免性能损失
+        from src.inference.rag_knowledge_base import RAGKnowledgeBase
+        from src.inference.rag_scoring_engine import RAGScoringEngine
+        from src.inference.vllm_client import VLLMInferenceClient
+        from src.data_processing.preprocessing_pipeline import PreprocessingPipeline
+        from src.utils.report_utils import save_scoring_report
+        
+        print("🔄 初始化组件...")
+        
+        # 初始化核心组件 (使用原版逻辑)
+        kb = RAGKnowledgeBase()
+        vllm_client = VLLMInferenceClient(base_url=ctx.obj['base_url'], model_name=ctx.obj['model'])
+        scoring_engine = RAGScoringEngine(vllm_client=vllm_client, knowledge_base=kb)
+        pipeline = PreprocessingPipeline()
+        
+        print("📄 处理文档...")
+        document = pipeline.process(file_path)
+        
+        print("⚖️  执行评分...")
+        result = scoring_engine.score_document(document)
+        
+        # 显示结果
+        print("\n📊 评分结果:")
+        summary = result.get('summary', {})
+        print(f"  总分: {summary.get('total_score', 0)}/{summary.get('max_total_score', 100)}")
+        print(f"  得分率: {summary.get('percentage', 0):.1f}%")
+        print(f"  等级: {summary.get('grade', '未知')}")
+        
+        # 生成报告 (JSON + HTML)
+        output_dir = Path("output/rag_scoring_reports")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        paths = save_scoring_report(
+            scoring_result=result,
+            file_stem=Path(file_path).stem,
+            output_dir=str(output_dir),
+            separate_html_dir=False,
+        )
+        print("\n📄 报告已保存:")
+        print(f"  📋 JSON: {paths['json_path']}")
+        if paths.get('html_path'):
+            print(f"  🌐 HTML: {paths['html_path']}")
+        else:
+            print("  🌐 HTML: 生成失败或跳过")
+        
+        print("✅ 快速评分完成!")
+        
+    except Exception as e:
+        print(f"❌ 评分失败: {e}")
+        if ctx.obj['verbose']:
+            import traceback
+            traceback.print_exc()
+
+@cli.command()
+@click.argument('directory', type=click.Path(exists=True))
+@click.option('--shared', is_flag=True, default=False, help='共享组件实例以提升性能（可能有状态影响）')
+@click.pass_context  
+def batch(ctx, directory, shared):
+    """快速批量评分"""
+    try:
+        dir_path = Path(directory)
+        pdf_files = list(dir_path.glob("*.pdf"))
+        
+        print(f"📚 批量评分: {len(pdf_files)} 个文件")
+        
+        if not pdf_files:
+            print("❌ 目录中没有PDF文件")
+            return
+        
+        # 批量处理
+        success_count = 0
+        output_dir = Path("output/rag_scoring_reports")
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        # 共享模式的可选单例
+        shared_resources = None
+        if shared:
+            try:
+                from src.inference.rag_knowledge_base import RAGKnowledgeBase
+                from src.inference.rag_scoring_engine import RAGScoringEngine
+                from src.inference.vllm_client import VLLMInferenceClient
+                from src.data_processing.preprocessing_pipeline import PreprocessingPipeline
+                shared_resources = {
+                    'kb': RAGKnowledgeBase(),
+                    'vllm': VLLMInferenceClient(base_url=ctx.obj['base_url'], model_name=ctx.obj['model']),
+                    'pipeline': PreprocessingPipeline(),
+                }
+                shared_resources['engine'] = RAGScoringEngine(
+                    vllm_client=shared_resources['vllm'],
+                    knowledge_base=shared_resources['kb']
+                )
+            except Exception as e:
+                print(f"⚠️  共享模式初始化失败，回退到隔离模式: {e}")
+                shared = False
+
+        for i, file_path in enumerate(pdf_files, 1):
+            try:
+                print(f"[{i}/{len(pdf_files)}] {file_path.name}")
+                
+                # 组件（按模式选择）
+                if shared and shared_resources:
+                    kb = shared_resources['kb']
+                    vllm_client = shared_resources['vllm']
+                    scoring_engine = shared_resources['engine']
+                    pipeline = shared_resources['pipeline']
+                else:
+                    from src.inference.rag_knowledge_base import RAGKnowledgeBase
+                    from src.inference.rag_scoring_engine import RAGScoringEngine  
+                    from src.inference.vllm_client import VLLMInferenceClient
+                    from src.data_processing.preprocessing_pipeline import PreprocessingPipeline
+                    kb = RAGKnowledgeBase()
+                    vllm_client = VLLMInferenceClient(base_url=ctx.obj['base_url'], model_name=ctx.obj['model'])
+                    scoring_engine = RAGScoringEngine(vllm_client=vllm_client, knowledge_base=kb)
+                    pipeline = PreprocessingPipeline()
+                
+                document = pipeline.process(str(file_path))
+                result = scoring_engine.score_document(document)
+                
+                summary = result.get('summary', {})
+                print(f"    ✅ 评分完成: {summary.get('total_score', 0):.1f}分")
+                
+                # 生成报告
+                from src.utils.report_utils import save_scoring_report
+                paths = save_scoring_report(
+                    scoring_result=result,
+                    file_stem=file_path.stem,
+                    output_dir=str(output_dir),
+                    separate_html_dir=False,
+                )
+                if paths.get('html_path'):
+                    print(f"    📄 报告: JSON + HTML")
+                else:
+                    print(f"    📄 报告: JSON only (HTML failed)")
+                
+                success_count += 1
+                
+            except Exception as e:
+                print(f"    ❌ 失败: {e}")
+        
+        print(f"\n🎯 批量完成: {success_count}/{len(pdf_files)} 成功")
+        
+    except Exception as e:
+        print(f"❌ 批量处理失败: {e}")
+
+@cli.command()
+@click.argument('json_dir', type=click.Path(exists=True))
+@click.pass_context
+def html(ctx, json_dir):
+    """转换JSON报告为HTML格式"""
+    try:
+        from src.utils.html_report_generator import HTMLReportGenerator
+        
+        print(f"🌐 批量转换JSON报告为HTML: {json_dir}")
+        print("=" * 50)
+        
+        generator = HTMLReportGenerator()
+        html_output_dir = Path(json_dir) / "html_reports"
+        
+        html_files = generator.batch_convert_reports(json_dir, str(html_output_dir))
+        
+        print(f"\n✅ 转换完成:")
+        for html_file in html_files:
+            print(f"  🌐 {html_file}")
+        
+        print(f"\n🎉 共生成 {len(html_files)} 个HTML报告!")
+        
+    except Exception as e:
+        print(f"❌ HTML转换失败: {e}")
+        if ctx.obj['verbose']:
+            import traceback
+            traceback.print_exc()
+
+@cli.command()
+def status():
+    """系统状态"""
+    print("📊 优化版系统状态")
+    print("=" * 30)
+    
+    # 检查关键组件
+    components = {
+        "原版VLLM客户端": "src/inference/vllm_client.py",
+        "原版知识库": "src/inference/rag_knowledge_base.py", 
+        "原版评分引擎": "src/inference/rag_scoring_engine.py",
+        "预处理管线": "src/data_processing/preprocessing_pipeline.py",
+        "HTML报告生成器": "src/utils/html_report_generator.py",
+        "本地嵌入模型": "models/all-MiniLM-L6-v2/",
+        "测试数据": "data/raw/",
+        "输出目录": "output/"
+    }
+    
+    for name, path in components.items():
+        status = "✅" if Path(path).exists() else "❌"
+        print(f"  {status} {name}")
+    
+    print("\n💡 此版本使用原版组件确保最佳性能")
+    print("🌐 现已集成HTML报告生成功能")
+
+if __name__ == '__main__':
+    cli()

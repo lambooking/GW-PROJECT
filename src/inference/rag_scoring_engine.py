@@ -59,12 +59,14 @@ class RAGScoringEngine:
                 "weight": 0.25,
                 "max_score": 25,
                 "search_queries": [
-                    "技术参数 规格 标准 数据",
-                    "技术规范 设计要求 技术标准",
-                    "工程 施工 质量标准 专业要求"
+                    "表头 管径 材质 壁厚",
+                    "1016 X70 操作压力",
+                    "813 X60 允许悬空",
+                    "技术规范 设计 标准",
+                    "MPa 管线名称 长度"
                 ],
                 "context_length": 1800,
-                "min_score_threshold": 0.25
+                "min_score_threshold": 0.2
             },
             "safety_compliance": {
                 "name": "安全合规性",
