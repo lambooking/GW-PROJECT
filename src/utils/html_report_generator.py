@@ -85,8 +85,17 @@ class HTMLReportGenerator:
         {self._generate_footer(report)}
     </div>
     
+    <!-- 图片模态框 -->
+    <div id="imageModal" class="modal">
+        <span class="close" onclick="closeImageModal()">&times;</span>
+        <div class="modal-content">
+            <img id="modalImage" src="" alt="放大图片">
+        </div>
+    </div>
+    
     <script>
         {self._generate_chart_script(detailed_scores)}
+        {self._generate_image_modal_script()}
     </script>
 </body>
 </html>
@@ -334,6 +343,104 @@ class HTMLReportGenerator:
             color: #adb5bd;
         }
         
+        .images-section {
+            margin-top: 25px;
+            padding-top: 20px;
+            border-top: 1px solid #e9ecef;
+        }
+        
+        .images-info {
+            margin-bottom: 15px;
+            font-size: 0.95em;
+        }
+        
+        .images-info small {
+            color: #6c757d;
+            display: block;
+            margin-top: 5px;
+        }
+        
+        .images-gallery {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 10px;
+        }
+        
+        .image-item {
+            text-align: center;
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 10px;
+            transition: transform 0.2s ease;
+        }
+        
+        .image-item:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+        
+        .image-item img {
+            max-width: 100%;
+            max-height: 200px;
+            object-fit: contain;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: opacity 0.2s ease;
+        }
+        
+        .image-item img:hover {
+            opacity: 0.8;
+        }
+        
+        .image-caption {
+            margin-top: 8px;
+            font-size: 0.9em;
+            color: #495057;
+            font-weight: 500;
+        }
+        
+        /* 模态框样式 */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.9);
+        }
+        
+        .modal-content {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            max-width: 90%;
+            max-height: 90%;
+        }
+        
+        .modal-content img {
+            width: 100%;
+            height: auto;
+            border-radius: 8px;
+        }
+        
+        .close {
+            position: absolute;
+            top: 15px;
+            right: 35px;
+            color: #f1f1f1;
+            font-size: 40px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        
+        .close:hover {
+            color: #bbb;
+        }
+        
         @media (max-width: 768px) {
             .container {
                 padding: 10px;
@@ -470,6 +577,8 @@ class HTMLReportGenerator:
                         <strong>💭 详细评分理由:</strong><br><br>
                         {self._format_reasoning(reasoning)}
                     </div>
+                    
+                    {self._generate_images_section(details)}
                 </div>
             </div>
             """
@@ -490,6 +599,52 @@ class HTMLReportGenerator:
         formatted = re.sub(r'(\d+\.?\d*%)', r'<strong style="color: #28a745;">\1</strong>', formatted)
         
         return formatted
+    
+    def _generate_images_section(self, details: Dict[str, Any]) -> str:
+        """生成图片展示部分"""
+        images_used = details.get("images_used", [])
+        images_count = details.get("images_count", 0)
+        total_images = details.get("total_images_in_document", 0)
+        
+        if not images_used:
+            if total_images > 0:
+                return f"""
+                <div class="images-section">
+                    <div class="images-info">
+                        <strong>🖼️ 图像分析:</strong> 未找到相关图片<br>
+                        <small>文档总图片数: {total_images} | 已使用: 0 | 建议补充相关图片以提高评分准确性</small>
+                    </div>
+                </div>
+                """
+            return ""
+        
+        html = f"""
+        <div class="images-section">
+            <div class="images-info">
+                <strong>🖼️ 图像分析:</strong> 已分析 {images_count} 张相关图片<br>
+                <small>文档总图片数: {total_images} | 已使用: {images_count} | 以下为发送给AI模型的图片</small>
+            </div>
+            <div class="images-gallery">
+        """
+        
+        for i, base64_image in enumerate(images_used, 1):
+            # 确保base64字符串格式正确
+            if not base64_image.startswith('data:image/'):
+                base64_image = f"data:image/jpeg;base64,{base64_image}"
+            
+            html += f"""
+                <div class="image-item">
+                    <img src="{base64_image}" alt="评分图片 {i}" onclick="showImageModal(this)">
+                    <div class="image-caption">图片 {i}</div>
+                </div>
+            """
+        
+        html += """
+            </div>
+        </div>
+        """
+        
+        return html
     
     def _generate_score_visualization(self) -> str:
         """生成评分可视化部分"""
@@ -564,6 +719,37 @@ class HTMLReportGenerator:
                 }}
             }}
         }});
+        """
+    
+    def _generate_image_modal_script(self) -> str:
+        """生成图片模态框JavaScript代码"""
+        return """
+        function showImageModal(img) {
+            const modal = document.getElementById('imageModal');
+            const modalImg = document.getElementById('modalImage');
+            modal.style.display = 'block';
+            modalImg.src = img.src;
+            modalImg.alt = img.alt;
+        }
+        
+        function closeImageModal() {
+            const modal = document.getElementById('imageModal');
+            modal.style.display = 'none';
+        }
+        
+        // 点击模态框背景关闭
+        document.getElementById('imageModal').onclick = function(event) {
+            if (event.target === this) {
+                closeImageModal();
+            }
+        }
+        
+        // ESC键关闭模态框
+        document.addEventListener('keydown', function(event) {
+            if (event.key === 'Escape') {
+                closeImageModal();
+            }
+        });
         """
     
     def _generate_footer(self, report: Dict[str, Any]) -> str:

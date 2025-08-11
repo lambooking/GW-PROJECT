@@ -399,8 +399,11 @@ class EnhancedPDFParser:
             nparr = np.frombuffer(image_data, np.uint8)
             img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
             
-            # 使用OCR提取文字
-            result = self.ocr.ocr(img, cls=False)
+            # 使用OCR提取文字（兼容不同版本，无需传cls参数）
+            try:
+                result = self.ocr.ocr(img)
+            except TypeError:
+                result = self.ocr.ocr(img)
             
             text_list = []
             if result:

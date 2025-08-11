@@ -59,7 +59,7 @@ class PreprocessingPipeline:
         # 1. 解析文档
         if file_suffix == '.docx':
             # 注意：当前的DocumentParser会返回一个自定义字典
-            raw_parsed_data = self.docx_parser._parse_docx(path)
+            raw_parsed_data = self.docx_parser.parse_docx(path)
         elif file_suffix == '.pdf':
             # EnhancedPDFParser返回一个更详细的字典
             raw_parsed_data = self.pdf_parser.parse_pdf_enhanced(path)

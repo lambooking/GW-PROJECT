@@ -3,7 +3,6 @@ from pathlib import Path
 from typing import Dict, Any
 import cv2
 import numpy as np
-from paddleocr import PaddleOCR
 import logging
 
 logger = logging.getLogger(__name__)
@@ -15,15 +14,19 @@ class DocumentParser:
     PDF的解析已移至EnhancedPDFParser。
     """
     
-    def __init__(self):
+    def __init__(self, enable_ocr: bool = False):
         """
-        初始化解析器和OCR引擎。
+        初始化解析器和可选的OCR引擎。
         """
-        try:
-            self.ocr = PaddleOCR(use_angle_cls=True, lang='ch')
-        except Exception as e:
-            logger.error(f"PaddleOCR 初始化失败，请检查环境配置: {e}")
-            self.ocr = None
+        self.ocr = None
+        if enable_ocr:
+            try:
+                # 延迟导入，避免在不需要时加载OCR依赖与模型
+                from paddleocr import PaddleOCR  # type: ignore
+                self.ocr = PaddleOCR(use_angle_cls=True, lang='ch')
+            except Exception as e:
+                logger.error(f"PaddleOCR 初始化失败，已禁用OCR: {e}")
+                self.ocr = None
 
     def parse_docx(self, file_path: Path) -> Dict[str, Any]:
         """
@@ -115,7 +118,12 @@ class DocumentParser:
             if img is None:
                 raise ValueError("无法解码图片数据")
 
-            result = self.ocr.ocr(img, cls=True)
+            # 兼容不同PaddleOCR版本：实例已配置use_angle_cls，无需在调用时传cls参数
+            try:
+                result = self.ocr.ocr(img)
+            except TypeError:
+                # 少数旧版需要不带关键字的调用
+                result = self.ocr.ocr(img)
             
             text_list = []
             if result:
