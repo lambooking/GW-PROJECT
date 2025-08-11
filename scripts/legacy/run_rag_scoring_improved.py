@@ -26,13 +26,16 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-# 导入现有的稳定模块
-from src.inference.rag_knowledge_base import RAGKnowledgeBase
-from src.inference.rag_scoring_engine import RAGScoringEngine
-from src.inference.vllm_client import VLLMInferenceClient
-from src.data_processing.preprocessing_pipeline import PreprocessingPipeline
-from src.utils.html_report_generator import HTMLReportGenerator
-from src.utils.report_utils import save_scoring_report
+# Ensure project root is on sys.path when running from scripts/ subdirectories
+try:
+    project_root = Path(__file__).resolve().parents[2]
+    if str(project_root) not in sys.path:
+        sys.path.insert(0, str(project_root))
+except Exception:
+    # Best-effort; imports below may still work when executed from repo root
+    pass
+
+# 延迟导入项目模块，避免在仅查看帮助时触发重依赖
 
 class ImprovedRAGScoringSystem:
     """改进的RAG评分系统 - 保持原有性能"""
@@ -61,6 +64,7 @@ class ImprovedRAGScoringSystem:
         """延迟初始化知识库"""
         if self._knowledge_base is None:
             logger.info("📚 初始化知识库...")
+            from src.inference.rag_knowledge_base import RAGKnowledgeBase
             self._knowledge_base = RAGKnowledgeBase()
             logger.info("✅ 知识库就绪")
         return self._knowledge_base
@@ -70,6 +74,7 @@ class ImprovedRAGScoringSystem:
         """延迟初始化VLLM客户端"""
         if self._vllm_client is None:
             logger.info("🤖 连接VLLM服务...")
+            from src.inference.vllm_client import VLLMInferenceClient
             self._vllm_client = VLLMInferenceClient(
                 base_url=self.vllm_base_url,
                 model_name=self.vllm_model
@@ -82,6 +87,7 @@ class ImprovedRAGScoringSystem:
         """延迟初始化评分引擎"""
         if self._scoring_engine is None:
             logger.info("⚖️  初始化评分引擎...")
+            from src.inference.rag_scoring_engine import RAGScoringEngine
             self._scoring_engine = RAGScoringEngine(
                 vllm_client=self.vllm_client,
                 knowledge_base=self.knowledge_base
@@ -94,6 +100,7 @@ class ImprovedRAGScoringSystem:
         """延迟初始化预处理管线"""
         if self._pipeline is None:
             logger.info("🔧 初始化预处理管线...")
+            from src.data_processing.preprocessing_pipeline import PreprocessingPipeline
             self._pipeline = PreprocessingPipeline()
             logger.info("✅ 预处理管线就绪")
         return self._pipeline
@@ -102,6 +109,7 @@ class ImprovedRAGScoringSystem:
     def html_generator(self):
         """延迟初始化HTML生成器"""
         if self._html_generator is None:
+            from src.utils.html_report_generator import HTMLReportGenerator
             self._html_generator = HTMLReportGenerator()
         return self._html_generator
     
@@ -141,6 +149,7 @@ class ImprovedRAGScoringSystem:
             scoring_result = self.scoring_engine.score_document(document)
             
             # 保存报告（JSON + HTML）
+            from src.utils.report_utils import save_scoring_report
             paths = save_scoring_report(
                 scoring_result=scoring_result,
                 file_stem=Path(file_path).stem,
