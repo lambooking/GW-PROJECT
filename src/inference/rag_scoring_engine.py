@@ -122,7 +122,7 @@ class RAGScoringEngine:
                 "name": "影像图标注识别",
                 "weight": 0.10,
                 "max_score": 10,
-                "search_queries": ["影像图", "管道位置", "实线", "潜在影响半径", "虚线", "建筑物", "人员数量", "建筑物名称"],
+                "search_queries": ["影像图标注", "管道位置实线", "潜在影响半径虚线", "建筑物标注", "人员数量标注", "建筑物名称", "管道标注", "影响范围标识"],
                 "context_length": 1500,
                 "type": "multimodal_image_annotation"
             },
@@ -130,7 +130,7 @@ class RAGScoringEngine:
                 "name": "入场线路图标注识别",
                 "weight": 0.10,
                 "max_score": 10,
-                "search_queries": ["入场路线", "路线标注", "文字说明", "可行车道路", "路线合理性"],
+                "search_queries": ["入场路线标注", "入场道路", "路线可行性", "道路通行", "路线合理性检查", "交通路线", "入场通道"],
                 "context_length": 1500,
                 "type": "multimodal_entry_route"
             },
@@ -138,7 +138,7 @@ class RAGScoringEngine:
                 "name": "逃生路线图、应急疏散集结点标注识别",
                 "weight": 0.10,
                 "max_score": 10,
-                "search_queries": ["逃生路线", "应急疏散", "集结点", "疏散方向", "潜在影响半径", "管道两侧"],
+                "search_queries": ["逃生路线图", "应急疏散路径", "疏散集结点", "应急集合点", "疏散通道", "逃生方向", "应急疏散方案"],
                 "context_length": 1500,
                 "type": "multimodal_escape_route"
             },
@@ -146,7 +146,7 @@ class RAGScoringEngine:
                 "name": "水体敏感图标注识别",
                 "weight": 0.05,
                 "max_score": 5,
-                "search_queries": ["围油设施", "防止位置", "水体敏感", "环境敏感"],
+                "search_queries": ["水体敏感区域", "河流水体", "饮用水源保护区", "生态敏感水域", "水体边界标注", "环境保护", "水源地"],
                 "context_length": 1000,
                 "type": "multimodal_water_sensitive"
             },
@@ -154,7 +154,7 @@ class RAGScoringEngine:
                 "name": "市政管网交叉图标注识别",
                 "weight": 0.05,
                 "max_score": 5,
-                "search_queries": ["市政管网", "交叉位置", "管网交叉", "人员密集型", "城区管道"],
+                "search_queries": ["市政管网交叉", "管道交叉点", "给排水管网", "管网交叉图", "交叉处标注", "管网类型", "安全距离"],
                 "context_length": 1000,
                 "type": "multimodal_municipal_pipeline"
             },
@@ -164,7 +164,7 @@ class RAGScoringEngine:
                 "name": "图片标注一致性",
                 "weight": 0.10,
                 "max_score": 10,
-                "search_queries": ["高后果区特征", "建筑物描述", "影像图标注", "一致性"],
+                "search_queries": ["图片编号", "图片说明", "图文对应", "标注规范", "图片引用", "标识符号", "图表说明"],
                 "context_length": 2000,
                 "type": "text_consistency_check"
             },
@@ -184,13 +184,13 @@ class RAGScoringEngine:
                 "context_length": 1000,
                 "type": "text_standard_compliance"
             },
-            "content_integrity": {
-                "name": "内容完整性检查",
+            "multimodal_content_recognition": {
+                "name": "多模态识别内容完整性检查",
                 "weight": 0.05,
                 "max_score": 5,
-                "search_queries": ["人员密集型", "市政管网交叉", "输油管道", "环境敏感", "围油设施"],
+                "search_queries": ["人员密集型", "市政管网交叉", "输油管道", "环境敏感", "围油设施", "水体敏感型", "附表"],
                 "context_length": 1500,
-                "type": "text_content_integrity"
+                "type": "multimodal_content_recognition"
             },
             "time_logic_consistency": {
                 "name": "时间逻辑一致性",
@@ -210,22 +210,13 @@ class RAGScoringEngine:
             },
             "template_consistency": {
                 "name": "文字模板一致性",
-                "weight": 0.10,
-                "max_score": 10,
+                "weight": 0.15,  # 从0.10提升到0.15，补充移除的识别效率权重
+                "max_score": 15,  # 相应调整最大分数
                 "search_queries": ["管道本体管控", "外部环境风险", "事故状态下前期处置", "模板要求"],
                 "context_length": 2000,
                 "type": "text_template_consistency"
             },
             
-            # 识别效率 (5分)
-            "recognition_efficiency": {
-                "name": "识别效率",
-                "weight": 0.05,
-                "max_score": 5,
-                "search_queries": ["综合评估"],
-                "context_length": 500,
-                "type": "efficiency_check"
-            }
         }
     
     def score_document(self, document: StandardizedDocument) -> Dict[str, Any]:
@@ -366,6 +357,8 @@ class RAGScoringEngine:
                 result = self._score_context_consistency(relevant_context, max_score)
             elif config.get("type") == "text_standard_compliance":
                 result = self._score_standard_compliance(relevant_context, max_score)
+            elif config.get("type") == "multimodal_content_recognition":
+                result = self._score_multimodal_content_recognition(document, relevant_context, max_score, config)
             elif config.get("type") == "text_content_integrity":
                 result = self._score_content_integrity(relevant_context, max_score)
             elif config.get("type") == "text_time_logic":
@@ -374,8 +367,6 @@ class RAGScoringEngine:
                 result = self._score_data_logic(relevant_context, max_score)
             elif config.get("type") == "text_template_consistency":
                 result = self._score_template_consistency(relevant_context, max_score)
-            elif config.get("type") == "efficiency_check":
-                result = self._score_efficiency(max_score)
             # 兼容旧的评分方法
             elif config.get("type") == "multimodal_route":
                 result = self._score_route_map_multimodal(document, relevant_context, max_score, config)
@@ -634,12 +625,34 @@ class RAGScoringEngine:
         
         # 按相关性分数排序，选择最相关的图片
         image_scores.sort(key=lambda x: x[0], reverse=True)
-        selected_images = [img_data for score, idx, img_data in image_scores[:limit] if score > 0.2]
+        # 动态调整相关性阈值，确保选择足够的图片
+        min_threshold = 0.2
+        if evaluation_type in ["signature", "content_completeness", "image_annotation"]:
+            min_threshold = 0.15  # 对重要评分项降低阈值
+        selected_images = [img_data for score, idx, img_data in image_scores[:limit] if score > min_threshold]
+        
+        # 如果选中图片太少，适当放宽标准
+        if len(selected_images) < max(2, limit//3):
+            selected_images = [img_data for score, idx, img_data in image_scores[:limit] if score > 0.1]
         
         logger.info(f"AI图片选择完成: 从{len(document.images)}张中选择了{len(selected_images)}张相关图片")
         
         # 返回选择的图片（为了兼容性，暂时保持简单格式）
         return selected_images
+    
+    def _detect_hca_type(self, context: str) -> str:
+        """检测高后果区类型"""
+        context_lower = context.lower()
+        
+        # 检测关键词
+        if any(keyword in context_lower for keyword in ["人员密集", "居民区", "学校", "医院", "商场", "办公楼"]):
+            return "人员密集型"
+        elif any(keyword in context_lower for keyword in ["水体敏感", "河流", "湖泊", "水源", "饮用水", "围油设施"]):
+            return "水体敏感型"
+        elif any(keyword in context_lower for keyword in ["环境敏感", "生态保护", "自然保护区", "湿地"]):
+            return "环境敏感型"
+        else:
+            return "未明确类型（默认按人员密集型检查）"
     
     def _get_image_selection_prompt(self, evaluation_type: str) -> str:
         """获取图片筛选的专门提示词"""
@@ -1160,36 +1173,69 @@ class RAGScoringEngine:
         }
     
     def _score_content_completeness_check(self, document: StandardizedDocument, context: str, max_score: int, config: Dict[str, Any]) -> Dict[str, Any]:
-        """内容完整性检查 (5分)"""
-        images = self._ai_assisted_image_selection(document, "content_completeness", limit=5)
+        """内容完整性检查 (5分) - 根据高后果区类型检查必需图像"""
+        images = self._ai_assisted_image_selection(document, "content_completeness", limit=8)
+        
+        # 分析文档类型
+        hca_type = self._detect_hca_type(context)
         
         prompt = f"""
-你是专业的高后果区方案审核专家。请检查文档是否包含必需的图像内容（满分{max_score}分）。
+你是专业的高后果区风险管控方案审核专家。请检查文档是否包含对应类型的必需图像（满分{max_score}分）。
 
 文本上下文：
 {context}
 
-必需检查项目：
-1. 高后果区影像图 (1分)
-2. 高后果区现场图 (1分) 
-3. 入场线路图 (1分)
-4. 逃生路线图 (1分)
-5. 应急疏散集合点位置/应急物资存放点/围油设施图 (1分)
+检测到的高后果区类型：{hca_type}
 
-评分规则：每少一个预埋考核点扣1分。
+必需图像检查标准：
+
+**人员密集型高后果区** 应包含：
+1. 高后果区影像图 (1分)
+2. 高后果区现场图 (1分)
+3. 入场线路图 (1分)
+4. 逃生路线图及应急疏散集合点位置 (1分)
+5. 应急物资存放点位置图 (1分)
+
+**环境敏感型高后果区** 应包含：
+1. 高后果区影像图 (1分)
+2. 高后果区现场图 (1分)
+3. 入场线路图 (1分)
+4. 应急物资存放点位置图 (1分)
+5. 预留检查项 (1分)
+
+**水体敏感型高后果区** 应包含：
+1. 高后果区影像图 (1分)
+2. 高后果区现场图 (1分)
+3. 入场线路图 (1分)
+4. 应急物资存放点位置图 (1分)
+5. 水体敏感型高后果区围油设施放置图 (1分)
+
+评分规则：每少审核出一个预埋考核点扣1分。
 
 请严格按以下格式输出：
 分数：X/{max_score}
-理由：[列出找到和缺失的图像内容]
+理由：[列出找到的图像和缺失的图像，说明扣分原因]
 """
         
-        response = self.vllm_client.multimodal_analysis(prompt, images_base64=images, max_tokens=512)
+        try:
+            response = self.vllm_client.multimodal_analysis(prompt, images_base64=images, max_tokens=600)
+        except Exception as e:
+            logger.error(f"内容完整性检查失败: {e}")
+            return {
+                "score": max_score // 2,
+                "reasoning": f"检查失败: {str(e)}，给予基础分数",
+                "evaluation_focus": "按类型的必需图像完整性检查",
+                "images_used": images,
+                "images_count": len(images),
+                "total_images_in_document": len(document.images)
+            }
+        
         score, reasoning = self.scoring_prompts.parse_simple_response(response, max_score)
         
         return {
             "score": score,
             "reasoning": reasoning,
-            "evaluation_focus": "必需图像内容完整性检查",
+            "evaluation_focus": "按类型的必需图像完整性检查",
             "images_used": images,
             "images_count": len(images),
             "total_images_in_document": len(document.images)
@@ -1706,6 +1752,61 @@ class RAGScoringEngine:
             "evaluation_focus": "内容完整性检查"
         }
     
+    def _score_multimodal_content_recognition(self, document: StandardizedDocument, context: str, max_score: int, config: Dict[str, Any]) -> Dict[str, Any]:
+        """多模态识别内容完整性检查 (5分) - 根据文档内容条件检查对应图像"""
+        images = self._ai_assisted_image_selection(document, "multimodal_content_recognition", limit=6)
+        
+        prompt = f"""
+你是专业的高后果区风险管控方案审核专家。请根据文档内容进行条件性多模态识别检查（满分{max_score}分）。
+
+文本上下文：
+{context}
+
+**条件性检查标准：**
+
+1. **人员密集型高后果区附表检查 (2.5分):**
+   - 如果文中存在人员密集型高后果区附表，则应包含市政管网交叉位置图
+   - 每少审核出一个预埋考核点扣1分
+
+2. **输油管道环境敏感类高后果区检查 (2.5分):**
+   - 如果文中存在输油管道环境敏感类高后果区描述，则应包含水体敏感型高后果区围油设施放置图
+   - 每少审核出一个预埋考核点扣1分
+
+**评分规则：**
+- 请先识别文档中是否存在以上两种条件
+- 如果条件存在，检查对应的必需图像是否包含
+- 如果条件不存在，该项得满分
+- 每少审核出一个预埋考核点扣1分
+
+请严格按以下格式输出：
+分数：X/{max_score}
+理由：[详细说明条件识别结果和对应图像检查情况，包括是否存在预埋考核点遗漏]
+"""
+        
+        try:
+            response = self.vllm_client.multimodal_analysis(prompt, images_base64=images, max_tokens=600)
+        except Exception as e:
+            logger.error(f"多模态识别内容完整性检查失败: {e}")
+            return {
+                "score": max_score // 2,
+                "reasoning": f"检查失败: {str(e)}，给予基础分数",
+                "evaluation_focus": "条件性多模态识别检查",
+                "images_used": images,
+                "images_count": len(images),
+                "total_images_in_document": len(document.images)
+            }
+        
+        score, reasoning = self.scoring_prompts.parse_simple_response(response, max_score)
+        
+        return {
+            "score": score,
+            "reasoning": reasoning,
+            "evaluation_focus": "条件性多模态识别检查",
+            "images_used": images,
+            "images_count": len(images),
+            "total_images_in_document": len(document.images)
+        }
+    
     def _score_time_logic(self, context: str, max_score: int) -> Dict[str, Any]:
         """时间逻辑一致性 (5分)"""
         prompt = f"""
@@ -1812,13 +1913,6 @@ class RAGScoringEngine:
         """文字模板一致性 (10分)"""
         return self._placeholder_text_scoring("文字模板一致性", max_score, context)
     
-    def _score_efficiency(self, max_score: int) -> Dict[str, Any]:
-        """识别效率 (5分)"""
-        return {
-            "score": max_score,  # 暂时给满分
-            "reasoning": f"分数：{max_score}/{max_score}\n理由：系统识别效率良好，在规定时间内完成。",
-            "evaluation_focus": "完成规定内容识别时间"
-        }
     
     def _placeholder_scoring_method(self, name: str, max_score: int, document: StandardizedDocument, context: str) -> Dict[str, Any]:
         """占位符评分方法，给予中等分数"""
