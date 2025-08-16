@@ -31,6 +31,9 @@ output/
 models/
 data/raw/
 
+# Augmented image files
+aug_img/
+
 # Debugging and temporary scripts
 debug_*.py
 demo_*.py
