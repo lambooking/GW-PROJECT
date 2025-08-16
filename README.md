@@ -1,38 +1,42 @@
-# 生产运维管理AI审核系统
+# RAG智能评分系统
 
 [![Python Version](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://python.org)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.95%2B-green.svg)](https://fastapi.tiangolo.com)
+[![RAG Technology](https://img.shields.io/badge/RAG-Enabled-green.svg)](README.md)
+[![Architecture](https://img.shields.io/badge/architecture-modular-blue.svg)](docs/README_NEW.md)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 ## 项目简介
 
-生产运维管理AI审核系统是一个基于人工智能技术的智能文档审核平台，专门用于生产运维管理领域的文档质量评估和合规性检查。
+RAG智能评分系统是一个基于检索增强生成(RAG)技术的文档智能评分系统，专门用于对作业指导书和高后果区风险管控方案进行自动化评估和评分。系统采用现代化的模块化架构，集成VLLM推理引擎和向量知识库，实现高效、准确的文档审核。
 
-### 主要功能
+### 🔥 核心特性
 
-- 📄 **作业指导书审核**: 智能评估作业指导书的结构完整性、内容完整性、语法错误等
-- 🏗️ **风险管控方案审核**: 多模态审核高后果区风险管控方案，包括图像识别和文本分析
-- 📊 **智能报告生成**: 自动生成详细的审核报告，支持HTML和Excel格式
-- 🚀 **批量处理**: 支持批量文档审核，提高工作效率
-- 🔍 **多模态分析**: 结合文本和图像信息进行综合评估
+- 📄 **作业指导书评分**: 基于RAG技术的智能评估，覆盖结构、内容、合规性检查
+- 🏗️ **风险管控方案评分**: 多模态分析，支持图像识别和文本理解
+- 🤖 **RAG增强**: 集成向量知识库，提供上下文感知的智能评分
+- 📊 **智能报告**: 自动生成HTML和JSON格式的详细评分报告
+- 🚀 **批量处理**: 支持大规模文档批量评分和处理
+- 🔧 **模块化架构**: 插件式设计，易于扩展和维护
 
-### 系统特性
+### 🎯 技术亮点
 
-- ✅ **高准确率**: 审核准确率≥85%，F1值≥85%
-- ⚡ **高效处理**: 单份文档审核时间≤120秒
-- 🔄 **批量支持**: 支持批量文档处理
-- 📱 **友好界面**: 提供直观的Web API接口
-- 🛡️ **信创兼容**: 支持信创环境部署
+- ✅ **VLLM集成**: 高性能大语言模型推理引擎
+- 🧠 **知识库驱动**: ChromaDB向量数据库支持检索增强
+- ⚡ **高效处理**: 单份文档评分时间≤120秒
+- 🔄 **脚本化**: 提供完整的Python脚本接口
+- 📱 **API接口**: RESTful API支持集成部署
+- 🛡️ **信创兼容**: 支持信创环境和开源模型部署
 
-## 快速开始
+## 🚀 快速开始
 
-### 环境要求
+### 📋 环境要求
 
 - Python 3.9+
-- 8GB+ RAM
-- 支持CUDA的GPU（可选，用于加速）
+- 8GB+ RAM (推荐16GB+)
+- VLLM服务 (用于大语言模型推理)
+- ChromaDB (可选，用于向量知识库)
 
-### 安装步骤
+### ⚙️ 安装步骤
 
 1. **克隆项目**
 ```bash
@@ -43,93 +47,147 @@ cd GW-PROJECT
 2. **安装依赖**
 ```bash
 pip install -r requirements.txt
+
+# 可选：安装向量数据库支持
+pip install chromadb sentence-transformers
 ```
 
 3. **配置系统**
 ```bash
-# 复制配置文件
-cp config/config.yaml.example config/config.yaml
-
-# 根据需要修改配置
-vim config/config.yaml
+# 配置文件已预置，可根据需要修改
+vim config/rag_config.yaml
 ```
 
-4. **启动服务**
+4. **启动VLLM服务**
 ```bash
-# 启动API服务
-python -m uvicorn src.api.app:app --host 0.0.0.0 --port 8000
-
-# 或使用脚本启动
-python scripts/start_server.py
+# 启动VLLM推理服务
+bash scripts/start_vllm.sh
 ```
 
-### 使用示例
+5. **初始化系统**
+```bash
+# 使用统一CLI工具初始化
+./ragcli init
 
-#### API调用示例
+# 或使用Python脚本
+python rag_scoring_system.py --help
+```
+
+### 💡 使用示例
+
+#### 统一CLI工具
+
+```bash
+# 查看所有可用命令
+./ragcli --help
+
+# 单文档评分
+./ragcli score document.docx --type instruction_book
+
+# 批量评分
+./ragcli batch ./documents/ --output ./results/
+
+# 启动知识库管理
+./ragcli kb --index ./knowledge_docs/
+
+# 生成HTML报告
+./ragcli report --input result.json --format html
+```
+
+#### Python API使用
 
 ```python
-import requests
+from src.core import RAGScoringApplication
+from src.config import ConfigManager
 
-# 审核作业指导书
-with open('document.docx', 'rb') as f:
-    response = requests.post(
-        'http://localhost:8000/audit/instruction-book',
-        files={'file': f}
-    )
-    result = response.json()
-    print(f"审核得分: {result['results']['overall_score']:.2f}")
+# 创建应用实例
+config = ConfigManager("config/rag_config.yaml")
+app = RAGScoringApplication(config)
+
+# 评分单个文档
+result = app.score_document("document.docx", "instruction_book")
+print(f"评分结果: {result.overall_score:.2f}")
+
+# 批量评分
+results = app.batch_score("./documents/", output_dir="./results/")
 ```
 
-#### 命令行使用
+#### 完整评分流程
 
 ```bash
-# 单文档审核
-python scripts/audit_document.py document.docx --type instruction_book
+# 1. 启动VLLM服务
+bash scripts/start_vllm.sh
 
-# 批量审核
-python scripts/batch_audit.py ./documents/ --output ./results/
+# 2. 初始化知识库
+./ragcli kb --build
+
+# 3. 运行评分
+python run_complete_rag_scoring.py document.docx instruction_book
+
+# 4. 查看结果
+ls output/rag_scoring_reports/
 ```
 
-## 项目结构
+## 📁 项目结构
 
 ```
 GW-PROJECT/
-├── config/                 # 配置文件
-│   ├── config.yaml         # 主配置文件
-│   └── model_config.py     # 模型配置
-├── src/                    # 源代码
-│   ├── common/             # 通用工具
-│   ├── data_processing/    # 数据处理
-│   ├── models/             # AI模型
-│   ├── inference/          # 推理引擎
-│   └── api/                # API接口
-├── scripts/                # 实用脚本
-├── data/                   # 数据目录
-├── output/                 # 输出目录
-│   ├── reports/            # 审核报告
-│   └── logs/               # 日志文件
-└── deployment/             # 部署配置
+├── src/                        # 🏗️ 核心源码 (模块化架构)
+│   ├── core/                   # 核心应用框架
+│   ├── config/                 # 配置管理系统
+│   ├── data/                   # 数据处理层
+│   │   ├── parsers/            # 文档解析器
+│   │   └── processors/         # 数据处理器
+│   ├── intelligence/           # 🧠 智能推理层
+│   │   ├── engines/            # RAG评分引擎
+│   │   ├── knowledge/          # 知识库管理
+│   │   └── clients/            # VLLM客户端
+│   ├── inference/              # 推理与评分
+│   ├── services/               # 业务服务层
+│   ├── api/                    # RESTful API
+│   └── utils/                  # 工具和报告生成
+├── config/                     # ⚙️ 配置文件
+│   └── rag_config.yaml         # 主配置文件
+├── cli/                        # 🔧 命令行工具
+├── scripts/                    # 📜 实用脚本
+│   └── start_vllm.sh          # VLLM启动脚本
+├── docs/                       # 📚 详细文档
+│   ├── README_NEW.md          # 重构架构说明
+│   ├── CODE_WORKFLOW.md       # 代码工作流
+│   └── 技术路线.md            # 技术实施路线
+├── output/                     # 📊 输出目录
+│   ├── rag_scoring_reports/   # 评分报告
+│   └── rag_knowledge_base/    # 向量知识库
+├── data/                       # 🗂️ 数据目录
+├── logs/                       # 📋 日志文件
+├── ragcli                      # 🚀 统一CLI入口
+├── rag_scoring_system.py       # 主应用入口
+└── requirements.txt            # Python依赖
 ```
 
-## API文档
+## 📖 文档资源
 
-启动服务后，访问以下地址查看API文档：
+### 详细文档
+- 📘 [重构架构说明](docs/README_NEW.md) - 模块化架构详细介绍
+- 🔄 [代码工作流程](docs/CODE_WORKFLOW.md) - 系统工作流程详解
+- 🛠️ [技术实施路线](docs/技术路线.md) - 技术方案和实现路径
+- 📋 [项目详细说明](docs/说明.md) - 完整的项目需求和规格
+- ⚡ [重构完成报告](docs/REFACTORING_COMPLETED.md) - 架构升级总结
 
-- Swagger UI: http://localhost:8000/docs
-- ReDoc: http://localhost:8000/redoc
+### API接口
 
-### 主要接口
+RAG评分系统提供RESTful API接口：
 
-| 接口 | 方法 | 描述 |
-|------|------|------|
-| `/audit/instruction-book` | POST | 审核作业指导书 |
-| `/audit/risk-management` | POST | 审核风险管控方案 |
-| `/audit/batch` | POST | 批量文档审核 |
-| `/health` | GET | 健康检查 |
+| 功能 | 入口文件 | 描述 |
+|------|----------|------|
+| 完整评分 | `run_complete_rag_scoring.py` | 主要评分入口 |
+| 兼容模式 | `run_complete_rag_scoring_compat.py` | 兼容性入口 |
+| 快速评分 | `rag_scoring_system.py` | 重构版入口 |
+| CLI工具 | `ragcli` | 统一命令行界面 |
 
-## 配置说明
+## ⚙️ 配置说明
 
-### 系统配置 (config/config.yaml)
+### 主配置文件 (config/rag_config.yaml)
 
 ```yaml
 # 系统配置
@@ -137,123 +195,128 @@ system:
   debug: false
   log_level: "INFO"
   max_workers: 4
-  gpu_enabled: true
+  timeout: 120
 
-# 模型配置
-models:
-  text_audit:
-    model_name: "chinese-roberta-wwm-ext"
-    max_length: 512
-    batch_size: 16
-  
-  multimodal_audit:
-    vision_model: "chinese-clip-vit-base-patch16"
-    text_model: "chinese-roberta-wwm-ext"
-    fusion_dim: 768
+# VLLM服务配置
+vllm:
+  host: "localhost"
+  port: 8000
+  model_name: "qwen2.5-vl-3b"
+  max_tokens: 2048
+  temperature: 0.1
 
-# 审核规则配置
-audit_rules:
-  instruction_book:
-    structure_completeness:
-      required_sections: ["目录", "职责", "作业内容", "相关文件", "记录文件"]
-      scoring_weight: 0.2
-    content_completeness:
-      scoring_weight: 0.4
-    # ... 其他配置
+# 知识库配置
+knowledge_base:
+  storage_type: "chromadb"
+  storage_path: "output/rag_knowledge_base"
+  embedding_model: "all-MiniLM-L6-v2"
+  chunk_size: 1000
+  chunk_overlap: 200
+
+# 文档处理配置
+processing:
+  supported_formats: [".pdf", ".docx", ".doc"]
+  max_file_size_mb: 50
+  ocr_enabled: true
+  image_extraction: true
 ```
 
-## 开发指南
+## 🔧 开发指南
 
-### 添加新的审核规则
+### 架构扩展
 
-1. 在 `src/models/` 中实现审核模型
-2. 在 `config/config.yaml` 中添加规则配置
-3. 在 `src/inference/audit_engine.py` 中注册新规则
+1. **添加新评分引擎**
+   ```bash
+   # 在 src/intelligence/engines/ 中实现新引擎
+   # 使用工厂模式注册到 ScoringEngineFactory
+   ```
 
-### 扩展支持的文档格式
+2. **扩展文档解析器**
+   ```bash
+   # 在 src/data/parsers/ 中添加新解析器
+   # 继承 BaseDocumentParser 基类
+   ```
 
-1. 在 `src/data_processing/document_parser.py` 中添加解析器
-2. 更新 `src/common/constants.py` 中的支持格式列表
+3. **添加新知识库类型**
+   ```bash
+   # 在 src/intelligence/knowledge/ 中实现
+   # 遵循 KnowledgeBase 接口规范
+   ```
 
-## 部署指南
-
-### Docker部署
+### 部署指南
 
 ```bash
-# 构建镜像
-docker build -t ai-audit-system .
+# 1. 准备VLLM服务
+bash scripts/start_vllm.sh
 
-# 运行容器
-docker run -p 8000:8000 ai-audit-system
+# 2. 启动API服务  
+python -m uvicorn src.api.app:app --host 0.0.0.0 --port 8000
+
+# 3. 或使用统一入口
+python rag_scoring_system.py
+
+# 4. 批量处理
+python run_complete_rag_scoring.py --batch ./documents/
 ```
 
-### 使用docker-compose
+## 🚀 性能优化
 
-```bash
-docker-compose up -d
-```
+### VLLM优化
+- 调整 `max_tokens` 和 `temperature` 参数
+- 根据GPU内存调整批处理大小
+- 使用tensor parallelism提升推理速度
 
-## 性能优化
+### 知识库优化
+- 调整chunk_size和chunk_overlap参数
+- 选择合适的embedding模型
+- 定期更新和清理向量库
 
-### GPU加速
+### 系统监控
+- 日志位置: `logs/rag_scoring_system.log`
+- 报告输出: `output/rag_scoring_reports/`
+- 性能指标: 120秒内完成单文档评分
 
-确保安装了CUDA和相应的PyTorch版本：
+## ❓ 常见问题
 
-```bash
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
-```
+### Q: VLLM服务启动失败怎么办？
+**A**: 检查以下几点：
+- 确保GPU内存充足（推荐8GB+）
+- 检查模型路径是否正确
+- 查看 `scripts/start_vllm.sh` 中的配置参数
 
-### 批量处理优化
-
-- 调整 `max_workers` 参数控制并发数
-- 使用SSD存储提高I/O性能
-- 增加内存以支持更大批量
-
-## 监控和日志
-
-### 日志配置
-
-日志文件位置: `output/logs/`
-
-### 性能监控
-
-- 处理时间统计
-- 内存使用监控
-- GPU利用率监控
-
-## 常见问题
-
-### Q: 如何处理大文件？
-
-A: 系统默认支持最大50MB的文件。如需处理更大文件，请修改配置文件中的 `max_file_size` 参数。
-
-### Q: 如何提高审核准确率？
-
-A: 可以通过以下方式提高准确率：
-- 使用更大的预训练模型
-- 增加训练数据
-- 调整审核规则权重
+### Q: 如何提高评分准确率？
+**A**: 可以通过以下方式优化：
+- 扩充知识库内容，提供更多参考文档
+- 调整VLLM的temperature参数（降低随机性）
+- 优化prompt工程，提供更精确的指令
 
 ### Q: 支持哪些文档格式？
-
-A: 目前支持：
+**A**: 当前支持：
 - Microsoft Word (.docx, .doc)
 - PDF (.pdf)
+- 支持OCR和图像提取
 
-## 许可证
+### Q: 如何进行批量评分？
+**A**: 使用以下方式：
+```bash
+# CLI方式
+./ragcli batch ./documents/ --output ./results/
+
+# Python脚本方式  
+python run_complete_rag_scoring.py --batch ./documents/
+```
+
+## 📄 许可证
 
 本项目采用 MIT 许可证。详见 [LICENSE](LICENSE) 文件。
 
-## 贡献指南
+## 🤝 参与贡献
 
-欢迎贡献代码！请阅读 [CONTRIBUTING.md](CONTRIBUTING.md) 了解详细信息。
-
-## 联系我们
-
-- 项目主页: [dengxianchi]
-- 问题反馈: [Issues]
-- 邮箱: [Contact Email]
+本项目是RAG智能评分系统的开源实现，欢迎：
+- 🐛 提交Bug报告和功能建议
+- 🔧 贡献代码和文档改进
+- 📚 完善知识库和测试用例
 
 ---
 
-**注意**: 这是一个AI竞赛项目，仅供学习和研究使用。
+> **项目说明**: 这是一个基于RAG技术的AI文档评分系统，专为生产运维管理领域文档审核而设计。系统采用模块化架构，集成VLLM推理引擎，支持高效、准确的文档质量评估。
