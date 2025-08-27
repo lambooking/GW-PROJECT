@@ -276,9 +276,6 @@ class PreprocessingPipeline:
     def _standardize_images(self, raw_images: list) -> list[Image]:
         """标准化图像内容"""
         standardized = []
-        # 根据解析器的不同，选择不同的OCR引擎实例
-        ocr_engine = self.pdf_parser if self.pdf_parser else self.docx_parser
-
         for i, item in enumerate(raw_images):
             img_data = item.get("data")
             if not img_data:
@@ -286,14 +283,12 @@ class PreprocessingPipeline:
 
             base64_str = base64.b64encode(img_data).decode('utf-8')
             
-            # 从解析器调用OCR功能
-            extracted_text = ocr_engine.extract_text_from_image(img_data)
-
+            # 简化：不进行OCR，直接让大模型判断图片内容
             standardized.append(
                 Image(
                     image_id=f"img_{i+1}",
                     base64_data=base64_str,
-                    extracted_text=extracted_text,
+                    extracted_text="",  # 不进行OCR预处理
                     page_number=item.get("page_number", 0) # docx无页码信息
                 )
             )

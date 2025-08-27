@@ -9,14 +9,10 @@ from typing import Dict, Any, List, Optional
 from concurrent.futures import ThreadPoolExecutor
 import time
 
-import base64
-import cv2
-import numpy as np
 from .rag_knowledge_base import RAGKnowledgeBase
 from .vllm_client import VLLMInferenceClient
 from .prompts import ScoringPrompts
 from ..data_processing.schemas import StandardizedDocument
-from ..data_processing.image_processor import ImageProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +25,7 @@ class RAGScoringEngine:
         self.vllm_client = vllm_client
         self.knowledge_base = knowledge_base
         self.scoring_prompts = ScoringPrompts()
-        self.image_processor = ImageProcessor()
+
         
         # 场景一评分项配置（文本为主）
         self.scoring_criteria_scene1 = {
@@ -479,63 +475,17 @@ class RAGScoringEngine:
         }
 
     # ========== 多模态场景二辅助方法 ==========
-    def _select_images(self, document: StandardizedDocument, keywords: List[str], limit: int = 3, mode: str = "default") -> List[str]:
-        """从文档中选择相关图片（返回base64列表）。支持关键词与手写检测模式。"""
+    def _select_images(self, document: StandardizedDocument, keywords: List[str], limit: int = 3) -> List[str]:
+        """从文档中选择图片（返回base64列表）。直接选择前几张图片，让大模型判断内容。"""
         selected: List[str] = []
-        lowered_keywords = [k.lower() for k in keywords]
-        for img in document.images:
-            if len(selected) >= limit:
-                break
-            text_blob = " ".join(filter(None, [img.description or "", img.extracted_text or ""]))
-            blob_lower = text_blob.lower()
-            if any(k in blob_lower for k in lowered_keywords):
-                selected.append(img.base64_data)
-        # 针对签字/手写类，多模态优先选择手写可能性高的图片
-        if mode == "handwriting":
-            ranked = self._rank_images_by_handwriting(document)
-            for b64 in ranked:
-                if b64 not in selected:
-                    selected.append(b64)
-                if len(selected) >= limit:
-                    break
-        # 如果仍没有选到足够图片，兜底选取前几张
-        if not selected:
-            for img in document.images[:limit]:
-                selected.append(img.base64_data)
-        return selected[:limit]
+        
+        # 直接选择前几张图片，让大模型自己判断内容类型
+        for img in document.images[:limit]:
+            selected.append(img.base64_data)
+        
+        return selected
 
-    def _rank_images_by_handwriting(self, document: StandardizedDocument, max_considered: int = 10) -> List[str]:
-        """基于签名/手写迹象对图片进行排序，返回按分数降序的base64列表。"""
-        scored: List[tuple[float, str]] = []
-        for img in document.images[:max_considered]:
-            try:
-                np_img = self._decode_base64_to_image(img.base64_data)
-                if np_img is None:
-                    continue
-                signatures = self.image_processor.detect_signatures(np_img)
-                score = 0.0
-                if signatures:
-                    # 使用签名检测的置信度累加作为分数
-                    score = sum(s.get("confidence", 0.0) for s in signatures)
-                # 轻量级边缘复杂度作为补充
-                gray = cv2.cvtColor(np_img, cv2.COLOR_BGR2GRAY)
-                edges = cv2.Canny(gray, 50, 150)
-                edge_density = float(np.count_nonzero(edges)) / float(edges.size)
-                score += edge_density
-                scored.append((score, img.base64_data))
-            except Exception:
-                continue
-        scored.sort(key=lambda x: x[0], reverse=True)
-        return [b64 for _, b64 in scored]
 
-    def _decode_base64_to_image(self, base64_str: str) -> np.ndarray:
-        try:
-            img_bytes = base64.b64decode(base64_str)
-            nparr = np.frombuffer(img_bytes, np.uint8)
-            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-            return img
-        except Exception:
-            return None
 
     def _score_route_map_multimodal(self, document: StandardizedDocument, context: str, max_score: int, config: Dict[str, Any]) -> Dict[str, Any]:
         images = self._select_images(document, config.get("image_keywords", []), limit=3)
@@ -547,7 +497,7 @@ class RAGScoringEngine:
         return {"score": score, "reasoning": reasoning, "evaluation_focus": "入场/疏散路线与集合点标注充分性"}
 
     def _score_signature_multimodal(self, document: StandardizedDocument, context: str, max_score: int, config: Dict[str, Any]) -> Dict[str, Any]:
-        images = self._select_images(document, config.get("image_keywords", []), limit=3, mode="handwriting")
+        images = self._select_images(document, config.get("image_keywords", []), limit=3)
         if not images:
             return {"score": 0, "reasoning": "未找到签字/签章相关图片", "evaluation_focus": "签字盖章页完整性"}
         prompt = self.scoring_prompts.get_signature_verification_prompt(context, max_score)
