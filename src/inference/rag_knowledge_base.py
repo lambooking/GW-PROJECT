@@ -201,49 +201,134 @@ class ChromaDBStorage(VectorStorage):
         return None
 
 class EmbeddingModel:
-    """封装SentenceTransformer的嵌入模型"""
+    """封装SentenceTransformer的嵌入模型，支持魔塔社区中文模型"""
     
-    def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
+    def __init__(self, 
+                 model_name: str = "iic/nlp_gte_sentence-embedding_chinese-base",
+                 local_model_path: str = "/home/dataset-assist-0/models/nlp_gte_sentence-embedding_chinese-base"):
+        """
+        初始化 Embedding 模型
+        
+        Args:
+            model_name: 魔塔社区模型ID
+            local_model_path: 本地模型缓存路径
+        """
         self.model_name = model_name
+        self.local_model_path = Path(local_model_path)
         self.model = None
-        self.embedding_dim = 384  # all-MiniLM-L6-v2的向量维度
+        self.embedding_dim = 768  # 中文GTE模型的向量维度
         
         try:
-            # 优先尝试从本地models目录加载模型
-            import os
-            from pathlib import Path
+            # 加载顺序：
+            # 1. 检查本地路径是否存在
+            # 2. 尝试从魔塔社区下载
+            # 3. 回退到项目内models目录
             
-            local_model_path = Path(__file__).parent.parent.parent / "models" / model_name
-            
-            if local_model_path.exists() and SENTENCE_TRANSFORMER_AVAILABLE:
-                logger.info(f"从本地路径加载模型: {local_model_path}")
-                from sentence_transformers import SentenceTransformer
-                self.model = SentenceTransformer(str(local_model_path))
-                logger.info(f"✅ 成功从本地加载SentenceTransformer模型: {model_name}")
-            elif SENTENCE_TRANSFORMER_AVAILABLE:
-                logger.info(f"本地模型不存在，尝试在线下载: {model_name}")
-                from sentence_transformers import SentenceTransformer
-                self.model = SentenceTransformer(model_name)
-                logger.info(f"✅ 成功在线加载SentenceTransformer模型: {model_name}")
+            if self._load_from_local():
+                logger.info(f"✅ 成功从本地加载模型: {self.local_model_path}")
+            elif self._download_from_modelscope():
+                logger.info(f"✅ 成功从魔塔社区下载模型到: {self.local_model_path}")
             else:
-                raise ImportError("SentenceTransformer not available")
+                raise ImportError("无法加载 Embedding 模型")
                 
         except Exception as e:
-            logger.error(f"Error loading SentenceTransformer model: {e}")
-            logger.warning("Using fallback random embeddings (not recommended for production)")
-            self.model = None
+            logger.error(f"❌ Embedding模型加载失败: {e}")
+            logger.error("请检查:")
+            logger.error("  1. 是否安装了 sentence-transformers: pip install sentence-transformers")
+            logger.error("  2. 是否安装了 modelscope: pip install modelscope")
+            logger.error(f"  3. 或手动下载模型到: {self.local_model_path}")
+            raise ImportError(f"Embedding模型加载失败: {e}")
+    
+    def _load_from_local(self) -> bool:
+        """从本地路径加载模型"""
+        if not SENTENCE_TRANSFORMER_AVAILABLE:
+            return False
+        
+        if self.local_model_path.exists():
+            try:
+                from sentence_transformers import SentenceTransformer
+                logger.info(f"正在从本地加载模型: {self.local_model_path}")
+                self.model = SentenceTransformer(str(self.local_model_path))
+                return True
+            except Exception as e:
+                logger.warning(f"从本地加载模型失败: {e}")
+                return False
+        else:
+            logger.info(f"本地模型路径不存在: {self.local_model_path}")
+            return False
+    
+    def _download_from_modelscope(self) -> bool:
+        """从魔塔社区下载模型"""
+        if not SENTENCE_TRANSFORMER_AVAILABLE:
+            logger.error("sentence-transformers 未安装")
+            return False
+        
+        try:
+            from modelscope import snapshot_download
+            from sentence_transformers import SentenceTransformer
+            
+            logger.info(f"正在从魔塔社区下载模型: {self.model_name}")
+            logger.info(f"下载位置: {self.local_model_path}")
+            
+            # 确保目录存在
+            self.local_model_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # 从魔塔社区下载模型
+            model_dir = snapshot_download(
+                self.model_name,
+                cache_dir=str(self.local_model_path.parent),
+                revision='master'
+            )
+            
+            logger.info(f"模型下载完成: {model_dir}")
+            
+            # 加载模型
+            self.model = SentenceTransformer(model_dir)
+            
+            # 如果下载位置不是预期位置，移动文件
+            if Path(model_dir) != self.local_model_path:
+                import shutil
+                if self.local_model_path.exists():
+                    shutil.rmtree(self.local_model_path)
+                shutil.move(model_dir, self.local_model_path)
+                logger.info(f"模型已移动到: {self.local_model_path}")
+            
+            return True
+            
+        except ImportError as e:
+            logger.error(f"modelscope 未安装或导入失败: {e}")
+            logger.error("请安装: pip install modelscope")
+            return False
+        except Exception as e:
+            logger.error(f"从魔塔社区下载模型失败: {e}")
+            return False
     
     def encode(self, texts: list) -> list:
-        """将文本转换为向量"""
-        if self.model is not None:
+        """
+        将文本转换为向量
+        
+        Args:
+            texts: 要编码的文本列表
+            
+        Returns:
+            向量列表
+        """
+        if self.model is None:
+            raise RuntimeError(
+                "Embedding模型未加载。请检查:\n"
+                "  1. sentence-transformers 是否已安装\n"
+                "  2. modelscope 是否已安装\n"
+                "  3. 网络连接是否正常\n"
+                f"  4. 或手动下载模型到: {self.local_model_path}"
+            )
+        
+        try:
             # 使用真实的SentenceTransformer模型
-            embeddings = self.model.encode(texts, convert_to_tensor=False)
+            embeddings = self.model.encode(texts, convert_to_tensor=False, show_progress_bar=False)
             return embeddings.tolist() if hasattr(embeddings, 'tolist') else embeddings
-        else:
-            # 备用方案：生成随机向量（仅用于测试，生产环境不推荐）
-            import numpy as np
-            logger.warning(f"使用随机向量生成 {len(texts)} 个文本的嵌入")
-            return [np.random.rand(self.embedding_dim).tolist() for _ in texts]
+        except Exception as e:
+            logger.error(f"文本编码失败: {e}")
+            raise RuntimeError(f"文本编码失败: {e}")
 
 class DocumentChunker:
     """文档智能分块器"""

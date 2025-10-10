@@ -4,6 +4,8 @@ DOCX document parser implementation.
 
 import base64
 import logging
+import subprocess
+import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
@@ -23,6 +25,13 @@ from ...core.exceptions import DocumentProcessingError
 
 logger = logging.getLogger(__name__)
 
+# 检查 antiword 是否可用
+ANTIWORD_AVAILABLE = shutil.which('antiword') is not None
+if ANTIWORD_AVAILABLE:
+    logger.info("antiword 命令可用，支持 .doc 文件解析")
+else:
+    logger.warning("antiword 命令不可用，.doc 文件将无法解析（请安装: apt-get install antiword 或 yum install antiword）")
+
 
 class DocxDocumentParser(BaseDocumentParser):
     """DOCX document parser using python-docx."""
@@ -39,9 +48,14 @@ class DocxDocumentParser(BaseDocumentParser):
         return file_path.suffix.lower() in ['.docx', '.doc']
     
     def _parse_document(self, file_path: Path) -> StandardizedDocument:
-        """Parse DOCX document."""
+        """Parse DOCX or DOC document."""
         self._validate_file_size(file_path)
         
+        # 检查文件扩展名，对 .doc 文件使用 antiword
+        if file_path.suffix.lower() == '.doc':
+            return self._parse_doc_with_antiword(file_path)
+        
+        # 对 .docx 文件使用 python-docx
         try:
             doc = DocxDocument(file_path)
             
@@ -214,3 +228,111 @@ class DocxDocumentParser(BaseDocumentParser):
     def _get_raw_text(self, text_content: List[TextContent]) -> str:
         """Get raw text from text content."""
         return "\n".join([content.content for content in text_content])
+    
+    def _parse_doc_with_antiword(self, file_path: Path) -> StandardizedDocument:
+        """
+        Parse .doc file using antiword command.
+        
+        This is a fallback method for old binary .doc format that python-docx cannot read.
+        """
+        if not ANTIWORD_AVAILABLE:
+            raise DocumentProcessingError(
+                f".doc 文件需要 antiword 工具支持。请安装: \n"
+                f"  Ubuntu/Debian: sudo apt-get install antiword\n"
+                f"  CentOS/RHEL: sudo yum install antiword\n"
+                f"或者将文件转换为 .docx 格式"
+            )
+        
+        try:
+            logger.info(f"使用 antiword 解析 .doc 文件: {file_path}")
+            
+            # 使用 antiword 提取文本
+            result = subprocess.run(
+                ['antiword', str(file_path)],
+                capture_output=True,
+                text=True,
+                timeout=60
+            )
+            
+            if result.returncode != 0:
+                raise DocumentProcessingError(
+                    f"antiword 执行失败: {result.stderr}"
+                )
+            
+            raw_text = result.stdout
+            
+            # 创建 DocumentInfo
+            document_info = DocumentInfo(
+                file_name=file_path.name,
+                file_path=str(file_path.absolute()),
+                total_pages=max(1, len(raw_text) // 2000),  # 粗略估算页数
+                file_size=self._get_file_size(file_path),
+                processing_timestamp=datetime.now()
+            )
+            
+            # 将文本分段处理
+            text_content = self._parse_raw_text_to_content(raw_text)
+            
+            return StandardizedDocument(
+                document_info=document_info,
+                text_content=text_content,
+                tables=[],  # antiword 不提取表格
+                images=[],  # antiword 不提取图片
+                raw_content=raw_text
+            )
+            
+        except subprocess.TimeoutExpired:
+            raise DocumentProcessingError(f"antiword 处理超时: {file_path}")
+        except Exception as e:
+            raise DocumentProcessingError(f".doc 文件解析失败: {e}")
+    
+    def _parse_raw_text_to_content(self, raw_text: str) -> List[TextContent]:
+        """
+        将 antiword 提取的原始文本解析为 TextContent 列表。
+        
+        Args:
+            raw_text: antiword 输出的原始文本
+            
+        Returns:
+            TextContent 对象列表
+        """
+        text_content = []
+        
+        # 按段落分割（连续两个换行符）
+        paragraphs = raw_text.split('\n\n')
+        current_page = 1
+        chars_count = 0
+        
+        for para_idx, paragraph in enumerate(paragraphs):
+            paragraph = paragraph.strip()
+            if not paragraph:
+                continue
+            
+            # 简单的标题检测
+            section_type = "content"
+            hierarchy_level = None
+            
+            if len(paragraph) < 100:
+                # 可能是标题
+                if any(paragraph.startswith(prefix) for prefix in ['第', '一', '二', '三', '四', '五', '1', '2', '3', '4', '5']):
+                    section_type = "title"
+                    hierarchy_level = 1
+            
+            content = TextContent(
+                section_type=section_type,
+                content=paragraph,
+                page_number=current_page,
+                hierarchy_level=hierarchy_level,
+                word_count=len(paragraph.strip())
+            )
+            
+            text_content.append(content)
+            
+            # 粗略的页数估算（每2000字符约一页）
+            chars_count += len(paragraph)
+            if chars_count >= 2000:
+                current_page += 1
+                chars_count = 0
+        
+        logger.info(f"从 .doc 文件提取了 {len(text_content)} 个段落")
+        return text_content
