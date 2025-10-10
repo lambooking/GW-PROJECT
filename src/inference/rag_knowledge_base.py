@@ -89,9 +89,12 @@ class ChromaDBStorage(VectorStorage):
         except:
             self.collection = self.client.create_collection(
                 name=collection_name,
-                metadata={"description": "Document chunks for RAG system"}
+                metadata={
+                    "description": "Document chunks for RAG system",
+                    "hnsw:space": "cosine"  # 使用余弦距离而非L2距离
+                }
             )
-            logger.info(f"Created new collection '{collection_name}'")
+            logger.info(f"Created new collection '{collection_name}' with cosine distance")
     
     def add_chunks(self, chunks: List[DocumentChunk], embeddings: List[List[float]]):
         """添加文档块到向量数据库"""
@@ -176,8 +179,9 @@ class ChromaDBStorage(VectorStorage):
                 section_name=metadata.get("section_name"),
                 metadata=metadata.get("metadata", {})
             )
-            # ChromaDB returns distance, convert to similarity score
-            similarity_score = 1.0 / (1.0 + distance)
+            # ChromaDB 使用余弦距离: distance = 1 - cosine_similarity
+            # 因此 similarity_score = 1 - distance
+            similarity_score = 1.0 - distance
             chunks_with_scores.append((chunk, similarity_score))
         
         return chunks_with_scores
