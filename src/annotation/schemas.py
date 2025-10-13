@@ -113,3 +113,4 @@ class AnnotationCollection(BaseModel):
         """获取指定严重程度的批注"""
         return [ann for ann in self.annotations if ann.severity == severity]
 
+

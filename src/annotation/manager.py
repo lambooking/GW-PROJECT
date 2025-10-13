@@ -53,11 +53,14 @@ class AnnotationManager:
             output_path = Path(output_path)
         
         # 生成批注列表
-        annotations = self._generate_annotations_from_scoring(scoring_result)
+        annotations_data = self._generate_annotations_from_scoring(scoring_result)
         
-        if not annotations:
+        if not annotations_data:
             logger.warning("没有生成任何批注")
             return original_file
+        
+        # 转换为Annotation对象
+        annotations = self._convert_to_annotation_objects(annotations_data)
         
         # 选择合适的批注器
         annotator = self._get_annotator(original_file)
@@ -203,6 +206,34 @@ class AnnotationManager:
         """提取章节名称"""
         return criterion_result.get('section_name')
     
+    def _convert_to_annotation_objects(self, annotations_data: List[Dict]) -> List[Annotation]:
+        """
+        将批注字典转换为Annotation对象
+        
+        Args:
+            annotations_data: 批注字典列表
+            
+        Returns:
+            Annotation对象列表
+        """
+        annotations = []
+        
+        for data in annotations_data:
+            try:
+                # 如果已经是Annotation对象，直接使用
+                if isinstance(data, Annotation):
+                    annotations.append(data)
+                else:
+                    # 转换字典为Annotation对象
+                    annotation = Annotation(**data)
+                    annotations.append(annotation)
+            except Exception as e:
+                logger.warning(f"转换批注失败，跳过: {e}")
+                continue
+        
+        logger.info(f"成功转换 {len(annotations)}/{len(annotations_data)} 条批注")
+        return annotations
+    
     def generate_annotation_report(
         self,
         annotations: List[Annotation],
@@ -266,4 +297,5 @@ class AnnotationManager:
         
         logger.info(f"批注报告已生成: {output_path}")
         return output_path
+
 

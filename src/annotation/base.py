@@ -85,3 +85,4 @@ class BaseAnnotator(ABC):
             f"(严重: {critical}, 警告: {warning}, 建议: {info})"
         )
 
+

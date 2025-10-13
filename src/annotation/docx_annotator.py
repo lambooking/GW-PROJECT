@@ -300,3 +300,4 @@ class DocxAnnotator(BaseAnnotator):
                 for idx, ann in enumerate(severity_list, 1):
                     doc.add_paragraph(f"{idx}. [{ann.location}] {ann.content}")
 
+

@@ -488,3 +488,4 @@ def _get_color_for_severity(self, severity):
 
 根据你的需求选择合适的方式即可！
 
+
