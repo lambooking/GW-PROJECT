@@ -31,6 +31,7 @@ from src.inference.rag_scoring_engine import RAGScoringEngine
 from src.inference.vllm_client import VLLMInferenceClient
 from src.data_processing.preprocessing_pipeline import PreprocessingPipeline
 from src.utils.html_report_generator import HTMLReportGenerator
+from src.annotation.manager import AnnotationManager
 
 class RAGScoringSystem:
     """完整的RAG评分系统"""
@@ -50,8 +51,10 @@ class RAGScoringSystem:
         # 创建输出目录
         self.output_dir = Path("output/rag_scoring_reports")
         self.html_output_dir = Path("output/rag_scoring_reports/html")
+        self.annotated_output_dir = Path("output/annotated_documents")
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.html_output_dir.mkdir(parents=True, exist_ok=True)
+        self.annotated_output_dir.mkdir(parents=True, exist_ok=True)
         
         # 初始化组件
         self.knowledge_base = None
@@ -59,6 +62,7 @@ class RAGScoringSystem:
         self.scoring_engine = None
         self.pipeline = None
         self.html_generator = HTMLReportGenerator()
+        self.annotation_manager = AnnotationManager()
         
     def initialize_components(self):
         """初始化所有组件"""
@@ -176,7 +180,21 @@ class RAGScoringSystem:
             except Exception as e:
                 logger.error(f"❌ HTML报告生成失败: {e}")
             
-            # 6. 打印评分摘要
+            # 6. 生成批注版文档
+            try:
+                logger.info("📝 正在生成批注版文档...")
+                annotated_file = self.generate_annotated_document(
+                    file_path, 
+                    scoring_result
+                )
+                logger.info(f"✅ 批注版文档已生成: {annotated_file}")
+                scoring_result['annotated_document_path'] = str(annotated_file)
+            except Exception as e:
+                logger.error(f"❌ 批注文档生成失败: {e}")
+                import traceback
+                traceback.print_exc()
+            
+            # 7. 打印评分摘要
             self._print_scoring_summary(scoring_result)
             
             return scoring_result
@@ -261,6 +279,54 @@ class RAGScoringSystem:
             traceback.print_exc()
             raise
     
+    def generate_annotated_document(
+        self,
+        original_file_path: str,
+        scoring_result: dict
+    ) -> Path:
+        """
+        生成批注版文档
+        
+        Args:
+            original_file_path: 原始文档路径
+            scoring_result: 评分结果
+            
+        Returns:
+            批注版文档路径
+        """
+        original_file = Path(original_file_path)
+        
+        # 生成输出路径
+        output_file = self.annotated_output_dir / f"{original_file.stem}_批注版{original_file.suffix}"
+        
+        # 调用批注管理器
+        annotated_file = self.annotation_manager.annotate_document(
+            original_file=original_file_path,
+            scoring_result=scoring_result,
+            output_path=output_file
+        )
+        
+        # 同时生成批注报告文本文件
+        try:
+            if scoring_result.get('annotations'):
+                from src.annotation.schemas import Annotation
+                # 转换为Annotation对象
+                annotations = [
+                    Annotation(**ann) if isinstance(ann, dict) else ann
+                    for ann in scoring_result['annotations']
+                ]
+                
+                report_file = self.annotated_output_dir / f"{original_file.stem}_批注报告.txt"
+                self.annotation_manager.generate_annotation_report(
+                    annotations,
+                    report_file
+                )
+                logger.info(f"📄 批注报告已生成: {report_file}")
+        except Exception as e:
+            logger.warning(f"生成批注报告失败: {e}")
+        
+        return annotated_file
+    
     def _print_scoring_summary(self, scoring_result: dict):
         """打印评分摘要"""
         print("\n" + "="*60)
@@ -279,6 +345,13 @@ class RAGScoringSystem:
         print(f"   - 总分: {summary['total_score']}/{summary['max_total_score']}")
         print(f"   - 得分率: {summary['percentage']:.1f}%")
         print(f"   - 等级: {summary['grade']}")
+        
+        # 打印批注统计
+        if 'annotation_count' in scoring_result:
+            print(f"\n📝 批注统计:")
+            print(f"   - 批注总数: {scoring_result['annotation_count']} 条")
+            if 'annotated_document_path' in scoring_result:
+                print(f"   - 批注文档: {scoring_result['annotated_document_path']}")
         
         print(f"\n📋 各项评分:")
         detailed_scores = scoring_result["detailed_scores"]

@@ -232,7 +232,13 @@ class RAGScoringEngine:
             }
         }
         
+        # 5. 生成批注信息
+        annotations = self._generate_annotations(document, scoring_results, scoring_criteria)
+        final_result["annotations"] = annotations
+        final_result["annotation_count"] = len(annotations)
+        
         logger.info(f"🎯 评分完成: {total_score}/{max_total_score} ({percentage:.1f}%) - {grade}")
+        logger.info(f"📝 生成了 {len(annotations)} 条批注")
         return final_result
     
     def _score_criterion(self, criterion_key: str, config: Dict[str, Any], document: StandardizedDocument) -> Dict[str, Any]:
@@ -549,4 +555,148 @@ class RAGScoringEngine:
     
     def search_document_content(self, query: str, top_k: int = 10) -> List[Dict[str, Any]]:
         """直接通过知识库实例搜索文档内容"""
-        return self.knowledge_base.search(query, top_k=top_k, min_score=0.2) 
+        return self.knowledge_base.search(query, top_k=top_k, min_score=0.2)
+    
+    def _generate_annotations(
+        self,
+        document: StandardizedDocument,
+        scoring_results: Dict[str, Any],
+        scoring_criteria: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+        """
+        根据评分结果生成批注列表
+        
+        Args:
+            document: 标准化文档
+            scoring_results: 评分结果
+            scoring_criteria: 评分标准
+            
+        Returns:
+            批注列表（字典格式，便于序列化）
+        """
+        annotations = []
+        
+        for criterion_key, result in scoring_results.items():
+            criterion_config = scoring_criteria.get(criterion_key, {})
+            
+            score = result.get("score", 0)
+            max_score = result.get("max_score", 0)
+            score_lost = max_score - score
+            
+            # 只为扣分项生成批注
+            if score_lost <= 0:
+                continue
+            
+            # 确定严重程度
+            severity = self._determine_annotation_severity(score_lost, max_score)
+            
+            # 提取位置信息
+            location_info = self._extract_annotation_location(
+                document, result, criterion_key
+            )
+            
+            # 生成批注
+            annotation = {
+                "location": location_info.get("location", "文档中"),
+                "page_number": location_info.get("page_number", 1),
+                "coordinates": location_info.get("coordinates"),
+                "annotation_type": "comment",
+                "severity": severity,
+                "score_item": result.get("name", criterion_key),
+                "content": result.get("reasoning", "需要改进"),
+                "suggestion": self._extract_suggestion_from_result(result),
+                "score_lost": score_lost,
+                "max_score": max_score,
+                "text_snippet": location_info.get("text_snippet"),
+                "section_name": location_info.get("section_name")
+            }
+            
+            annotations.append(annotation)
+        
+        return annotations
+    
+    def _determine_annotation_severity(self, score_lost: float, max_score: float) -> str:
+        """确定批注严重程度"""
+        if score_lost >= 5:
+            return "critical"
+        elif score_lost >= 2:
+            return "warning"
+        else:
+            return "info"
+    
+    def _extract_annotation_location(
+        self,
+        document: StandardizedDocument,
+        scoring_result: Dict[str, Any],
+        criterion_key: str
+    ) -> Dict[str, Any]:
+        """
+        提取批注位置信息
+        
+        返回包含 location, page_number, coordinates, text_snippet, section_name 的字典
+        """
+        location_info = {
+            "location": "文档中",
+            "page_number": 1,
+            "coordinates": None,
+            "text_snippet": None,
+            "section_name": None
+        }
+        
+        # 1. 尝试从上下文中提取位置信息
+        context = scoring_result.get("context_used", "")
+        if context:
+            # 提取文本片段（用于定位）
+            location_info["text_snippet"] = context[:200]
+            
+            # 尝试在文档中查找该文本片段
+            snippet = context[:100].strip()
+            for text_content in document.text_content:
+                if snippet in text_content.content:
+                    location_info["page_number"] = text_content.page_number
+                    location_info["coordinates"] = text_content.coordinates
+                    location_info["section_name"] = text_content.section_name
+                    location_info["location"] = f"第{text_content.page_number}页"
+                    
+                    if text_content.section_name:
+                        location_info["location"] = f"{text_content.section_name} (第{text_content.page_number}页)"
+                    break
+        
+        # 2. 针对特定评分项的定位策略
+        if criterion_key == "structure_completeness":
+            location_info["location"] = "文档结构"
+            location_info["section_name"] = "目录/章节"
+        elif criterion_key == "technical_accuracy":
+            # 查找表格位置
+            if document.tables:
+                first_table = document.tables[0]
+                location_info["page_number"] = first_table.page_number
+                location_info["location"] = f"技术参数表 (第{first_table.page_number}页)"
+        elif criterion_key == "signature_completeness":
+            # 查找签字页（通常在最后）
+            if document.images:
+                last_image = document.images[-1]
+                location_info["page_number"] = last_image.page_number
+                location_info["location"] = f"签字页 (第{last_image.page_number}页)"
+        
+        return location_info
+    
+    def _extract_suggestion_from_result(self, scoring_result: Dict[str, Any]) -> Optional[str]:
+        """从评分结果中提取修改建议"""
+        reasoning = scoring_result.get("reasoning", "")
+        
+        # 尝试从reasoning中提取建议
+        if "建议" in reasoning:
+            parts = reasoning.split("建议")
+            if len(parts) > 1:
+                return "建议" + parts[1].strip()
+        
+        # 根据评分项生成通用建议
+        name = scoring_result.get("name", "")
+        score = scoring_result.get("score", 0)
+        max_score = scoring_result.get("max_score", 1)
+        
+        if score / max_score < 0.5:
+            return f"请完善{name}相关内容，确保符合标准要求"
+        else:
+            return f"请进一步优化{name}，提升质量" 

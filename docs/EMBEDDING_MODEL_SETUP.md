@@ -244,3 +244,4 @@ local_model_path = "/home/dataset-assist-0/models/nlp_corom_sentence-embedding_c
 - 2025-10-10: 添加 .doc 文件解析（antiword）
 - 2025-10-10: 移除随机向量 fallback，强制使用真实模型
 
+

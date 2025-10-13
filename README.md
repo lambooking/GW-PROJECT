@@ -5,6 +5,26 @@
 [![Architecture](https://img.shields.io/badge/architecture-modular-blue.svg)](docs/README_NEW.md)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
+## 🎉 重要更新 (2025-10-10)
+
+**系统已完成重大修复和优化！** 主要改进：
+
+1. ✅ **替换为魔塔社区中文 Embedding 模型** - 修复评分为 0 的问题
+   - 使用 `iic/nlp_gte_sentence-embedding_chinese-base` (768维中文优化模型)
+   - 无需访问 HuggingFace，支持国内网络环境
+   - 大幅提升中文文本语义理解能力
+
+2. ✅ **新增 .doc 文件支持** - 使用 antiword 工具解析老版本 Word 文档
+   - 支持 `.pdf`、`.docx`、`.doc` 三种文档格式
+   - 自动检测并使用合适的解析器
+
+3. ✅ **移除随机向量 fallback** - 强制使用真实模型，确保评分准确性
+
+**快速开始**: 📖 查看 [快速开始指南](./QUICKSTART_AFTER_FIX.md)  
+**详细说明**: 📚 查看 [修复总结](./docs/FIX_SUMMARY.md) | [配置指南](./docs/EMBEDDING_MODEL_SETUP.md)
+
+---
+
 ## 项目简介
 
 RAG智能评分系统是一个基于检索增强生成(RAG)技术的文档智能评分系统，专门用于对作业指导书和高后果区风险管控方案进行自动化评估和评分。系统采用现代化的模块化架构，集成VLLM推理引擎和向量知识库，实现高效、准确的文档审核。

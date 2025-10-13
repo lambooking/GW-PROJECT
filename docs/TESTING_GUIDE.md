@@ -350,3 +350,4 @@ time python run_complete_rag_scoring.py score document.pdf
 2. 检查配置: `output/rag_knowledge_base/document_registry.json`
 3. 参考文档: `docs/EMBEDDING_MODEL_SETUP.md`
 
+
