@@ -30,7 +30,8 @@ class PreprocessingPipeline:
         Args:
             enable_enhanced_ocr: 是否启用增强OCR（兼容测试参数，不影响当前实现）
         """
-        self.docx_parser = DocumentParser()
+        # 启用OCR以便从DOCX内嵌图片中提取可检索文本
+        self.docx_parser = DocumentParser(enable_ocr=True)
         self.pdf_parser = EnhancedPDFParser()
         self.classifier = DocumentClassifier()
         self.enable_enhanced_ocr = enable_enhanced_ocr
@@ -66,8 +67,8 @@ class PreprocessingPipeline:
         else:
             raise ValueError(f"不支持的文件格式: {file_suffix}")
             
-        # 2. 场景分类
-        classification_result = self.classifier.classify_document(raw_parsed_data)
+        # 2. 场景分类（传入文件名以提升准确度）
+        classification_result = self.classifier.classify_document(raw_parsed_data, file_name=path.name)
         
         # 3. 结果标准化
         standardized_output = self._standardize_output(
@@ -283,12 +284,19 @@ class PreprocessingPipeline:
 
             base64_str = base64.b64encode(img_data).decode('utf-8')
             
-            # 简化：不进行OCR，直接让大模型判断图片内容
+            # 使用已启用的OCR（若可用）从图片中提取文字，增强RAG可检索性
+            ocr_text = ""
+            try:
+                if getattr(self.docx_parser, "ocr", None):
+                    ocr_text = self.docx_parser.extract_text_from_image(img_data) or ""
+            except Exception:
+                ocr_text = ""
+
             standardized.append(
                 Image(
                     image_id=f"img_{i+1}",
                     base64_data=base64_str,
-                    extracted_text="",  # 不进行OCR预处理
+                    extracted_text=ocr_text,
                     page_number=item.get("page_number", 0) # docx无页码信息
                 )
             )

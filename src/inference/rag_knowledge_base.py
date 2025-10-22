@@ -736,8 +736,17 @@ class RAGKnowledgeBase:
     def _calculate_document_hash(self, document: StandardizedDocument) -> str:
         """计算文档内容哈希"""
         content_str = f"{document.document_info.file_name}_{document.document_info.total_pages}"
+        # 文本与表格内容
         content_str += "".join([text.content for text in document.text_content])
         content_str += "".join([str(table.data) for table in document.tables])
+        # 将图片的OCR文本纳入哈希，确保新增OCR后可以触发更新
+        try:
+            if document.images:
+                ocr_concat = "".join([(img.extracted_text or "") for img in document.images])
+                content_str += ocr_concat
+                content_str += f"#images={len(document.images)}"
+        except Exception:
+            pass
         return hashlib.md5(content_str.encode()).hexdigest()
     
     def get_stats(self) -> Dict[str, Any]:

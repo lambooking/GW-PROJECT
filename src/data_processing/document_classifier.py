@@ -61,12 +61,13 @@ class DocumentClassifier:
             r"现场图"
         ]
     
-    def classify_document(self, parsed_content: Dict[str, Any]) -> Dict[str, Any]:
+    def classify_document(self, parsed_content: Dict[str, Any], file_name: Optional[str] = None) -> Dict[str, Any]:
         """
         分类文档
         
         Args:
             parsed_content: 解析后的文档内容
+            file_name: 可选，原始文件名，用于增强型启发式判断
             
         Returns:
             分类结果字典
@@ -74,6 +75,8 @@ class DocumentClassifier:
         try:
             # 合并所有文本内容
             full_text = self._extract_full_text(parsed_content)
+            head_text = full_text[:1000] if full_text else ""
+            file_name_lower = (file_name or "").lower()
             
             # 计算关键词匹配分数
             scenario_one_score = self._calculate_keyword_score(full_text, self.scenario_one_keywords)
@@ -83,12 +86,42 @@ class DocumentClassifier:
             scenario_one_structure_score = self._calculate_structure_score(full_text, self.scenario_one_structure)
             scenario_two_structure_score = self._calculate_structure_score(full_text, self.scenario_two_structure)
             
+            # 文件名与首页强启发式加权（错误分场景常见于标题与文件名）
+            # 文件名强信号
+            if any(k in file_name_lower for k in ["作业指导书", "指导书"]):
+                scenario_one_score += 3.0
+            if any(k in file_name_lower for k in ["高后果区", "风险管控方案", "hca"]):
+                scenario_two_score += 3.0
+
+            # 首页/标题强信号
+            if any(k in head_text for k in ["作业指导书", "操作规程", "岗位职责"]):
+                scenario_one_score += 2.0
+            if any(k in head_text for k in ["高后果区", "风险管控方案", "HCA"]):
+                scenario_two_score += 2.0
+
             # 综合评分
             total_one_score = scenario_one_score + scenario_one_structure_score
             total_two_score = scenario_two_score + scenario_two_structure_score
             
             # 确定场景
-            if total_one_score > total_two_score:
+            # 若分差很接近且标题/文件名指向性强，则优先按指向性决策
+            margin = abs(total_one_score - total_two_score)
+            if margin < 1.0:
+                if any(k in file_name_lower for k in ["作业指导书", "指导书"]) or any(k in head_text for k in ["作业指导书", "操作规程", "岗位职责"]):
+                    prefer_one = True
+                elif any(k in file_name_lower for k in ["高后果区", "风险管控方案", "hca"]) or any(k in head_text for k in ["高后果区", "风险管控方案", "HCA"]):
+                    prefer_one = False
+                else:
+                    prefer_one = total_one_score >= total_two_score
+                if prefer_one:
+                    scenario = "scenario_one"
+                    scenario_name = "作业指导书"
+                    confidence = max(0.5, total_one_score / (total_one_score + total_two_score) if (total_one_score + total_two_score) > 0 else 0.5)
+                else:
+                    scenario = "scenario_two"
+                    scenario_name = "高后果区风险管控方案"
+                    confidence = max(0.5, total_two_score / (total_one_score + total_two_score) if (total_one_score + total_two_score) > 0 else 0.5)
+            elif total_one_score > total_two_score:
                 scenario = "scenario_one"
                 scenario_name = "作业指导书"
                 confidence = total_one_score / (total_one_score + total_two_score)
