@@ -480,9 +480,14 @@ class RAGScoringEngine:
         selected: List[str] = []
         
         # 直接选择前几张图片，让大模型自己判断内容类型
-        for img in document.images[:limit]:
+        for img in document.images:
+            if not img.base64_data:
+                continue
             selected.append(img.base64_data)
+            if len(selected) >= limit:
+                break
         
+        logger.info(f"多模态评分将发送 {len(selected)} 张图片至模型（limit={limit}，文档共有 {len(document.images)} 张）。")
         return selected
 
 
@@ -490,47 +495,47 @@ class RAGScoringEngine:
     def _score_route_map_multimodal(self, document: StandardizedDocument, context: str, max_score: int, config: Dict[str, Any]) -> Dict[str, Any]:
         images = self._select_images(document, config.get("image_keywords", []), limit=3)
         if not images:
-            return {"score": 0, "reasoning": "未找到与路线相关的图片", "evaluation_focus": "入场/疏散路线图质量"}
+            return {"score": 0, "reasoning": "未找到与路线相关的图片", "evaluation_focus": "入场/疏散路线图质量", "images_used": [], "images_count": 0, "total_images_in_document": len(document.images)}
         prompt = self.scoring_prompts.get_route_map_evaluation_prompt(context, max_score)
         response = self.vllm_client.multimodal_analysis(prompt, images_base64=images, max_tokens=512)
         score, reasoning = self.scoring_prompts.parse_simple_response(response, max_score)
-        return {"score": score, "reasoning": reasoning, "evaluation_focus": "入场/疏散路线与集合点标注充分性"}
+        return {"score": score, "reasoning": reasoning, "evaluation_focus": "入场/疏散路线与集合点标注充分性", "images_used": images, "images_count": len(images), "total_images_in_document": len(document.images)}
 
     def _score_signature_multimodal(self, document: StandardizedDocument, context: str, max_score: int, config: Dict[str, Any]) -> Dict[str, Any]:
         images = self._select_images(document, config.get("image_keywords", []), limit=3)
         if not images:
-            return {"score": 0, "reasoning": "未找到签字/签章相关图片", "evaluation_focus": "签字盖章页完整性"}
+            return {"score": 0, "reasoning": "未找到签字/签章相关图片", "evaluation_focus": "签字盖章页完整性", "images_used": [], "images_count": 0, "total_images_in_document": len(document.images)}
         prompt = self.scoring_prompts.get_signature_verification_prompt(context, max_score)
         response = self.vllm_client.multimodal_analysis(prompt, images_base64=images, max_tokens=512)
         score, reasoning = self.scoring_prompts.parse_simple_response(response, max_score)
-        return {"score": score, "reasoning": reasoning, "evaluation_focus": "签字角色齐全性与清晰度"}
+        return {"score": score, "reasoning": reasoning, "evaluation_focus": "签字角色齐全性与清晰度", "images_used": images, "images_count": len(images), "total_images_in_document": len(document.images)}
 
     def _score_hca_multimodal(self, document: StandardizedDocument, context: str, max_score: int, config: Dict[str, Any]) -> Dict[str, Any]:
         images = self._select_images(document, config.get("image_keywords", []), limit=3)
         if not images:
-            return {"score": 0, "reasoning": "未找到HCA影像/示意图", "evaluation_focus": "HCA关键区域覆盖与风险标注"}
+            return {"score": 0, "reasoning": "未找到HCA影像/示意图", "evaluation_focus": "HCA关键区域覆盖与风险标注", "images_used": [], "images_count": 0, "total_images_in_document": len(document.images)}
         prompt = self.scoring_prompts.get_hca_image_analysis_prompt(context, max_score)
         response = self.vllm_client.multimodal_analysis(prompt, images_base64=images, max_tokens=512)
         score, reasoning = self.scoring_prompts.parse_simple_response(response, max_score)
-        return {"score": score, "reasoning": reasoning, "evaluation_focus": "HCA覆盖范围与风险点标注充分性"}
+        return {"score": score, "reasoning": reasoning, "evaluation_focus": "HCA覆盖范围与风险点标注充分性", "images_used": images, "images_count": len(images), "total_images_in_document": len(document.images)}
 
     def _score_risk_signage_multimodal(self, document: StandardizedDocument, context: str, max_score: int, config: Dict[str, Any]) -> Dict[str, Any]:
         images = self._select_images(document, config.get("image_keywords", []), limit=3)
         if not images:
-            return {"score": 0, "reasoning": "未找到风险提示/标识相关图片", "evaluation_focus": "现场风险提示与管控标识"}
+            return {"score": 0, "reasoning": "未找到风险提示/标识相关图片", "evaluation_focus": "现场风险提示与管控标识", "images_used": [], "images_count": 0, "total_images_in_document": len(document.images)}
         prompt = self.scoring_prompts.get_risk_controls_visual_prompt(context, max_score)
         response = self.vllm_client.multimodal_analysis(prompt, images_base64=images, max_tokens=512)
         score, reasoning = self.scoring_prompts.parse_simple_response(response, max_score)
-        return {"score": score, "reasoning": reasoning, "evaluation_focus": "风险提示与防护标识的可见性与规范性"}
+        return {"score": score, "reasoning": reasoning, "evaluation_focus": "风险提示与防护标识的可见性与规范性", "images_used": images, "images_count": len(images), "total_images_in_document": len(document.images)}
 
     def _score_emergency_evac_multimodal(self, document: StandardizedDocument, context: str, max_score: int, config: Dict[str, Any]) -> Dict[str, Any]:
         images = self._select_images(document, config.get("image_keywords", []), limit=3)
         if not images:
-            return {"score": 0, "reasoning": "未找到应急疏散/集合点相关图片", "evaluation_focus": "应急疏散图文一致性"}
+            return {"score": 0, "reasoning": "未找到应急疏散/集合点相关图片", "evaluation_focus": "应急疏散图文一致性", "images_used": [], "images_count": 0, "total_images_in_document": len(document.images)}
         prompt = self.scoring_prompts.get_emergency_evac_plan_prompt(context, max_score)
         response = self.vllm_client.multimodal_analysis(prompt, images_base64=images, max_tokens=512)
         score, reasoning = self.scoring_prompts.parse_simple_response(response, max_score)
-        return {"score": score, "reasoning": reasoning, "evaluation_focus": "应急疏散方案的图文一致性与可操作性"}
+        return {"score": score, "reasoning": reasoning, "evaluation_focus": "应急疏散方案的图文一致性与可操作性", "images_used": images, "images_count": len(images), "total_images_in_document": len(document.images)}
     
     # 旧的解析方法已被简化的parse_simple_response替代
     
