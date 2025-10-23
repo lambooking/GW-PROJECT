@@ -476,18 +476,35 @@ class RAGScoringEngine:
 
     # ========== 多模态场景二辅助方法 ==========
     def _select_images(self, document: StandardizedDocument, keywords: List[str], limit: int = 3) -> List[str]:
-        """从文档中选择图片（返回base64列表）。直接选择前几张图片，让大模型判断内容。"""
+        """基于关键词与OCR结果优选相关图片；若未命中则回退为前N张。"""
         selected: List[str] = []
-        
-        # 直接选择前几张图片，让大模型自己判断内容类型
-        for img in document.images:
-            if not img.base64_data:
-                continue
-            selected.append(img.base64_data)
-            if len(selected) >= limit:
-                break
-        
-        logger.info(f"多模态评分将发送 {len(selected)} 张图片至模型（limit={limit}，文档共有 {len(document.images)} 张）。")
+        normalized_keywords = [k.lower() for k in (keywords or [])]
+
+        # 1) 先按OCR文本匹配关键词
+        if normalized_keywords:
+            for img in document.images:
+                if not img.base64_data:
+                    continue
+                ocr_text = (img.extracted_text or "").lower()
+                if any(k in ocr_text for k in normalized_keywords):
+                    selected.append(img.base64_data)
+                    if len(selected) >= limit:
+                        break
+
+        # 2) 若未选满，则回退补齐到limit
+        if len(selected) < limit:
+            for img in document.images:
+                if not img.base64_data:
+                    continue
+                if img.base64_data in selected:
+                    continue
+                selected.append(img.base64_data)
+                if len(selected) >= limit:
+                    break
+
+        logger.info(
+            f"多模态评分将发送 {len(selected)} 张图片至模型（limit={limit}，文档共有 {len(document.images)} 张，关键词={keywords}）。"
+        )
         return selected
 
 
