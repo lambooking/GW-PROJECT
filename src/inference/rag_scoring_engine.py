@@ -138,10 +138,14 @@ class RAGScoringEngine:
                 "weight": 0.15,
                 "max_score": 15,
                 "search_queries": [
-                    "签字", "签章", "批准", "审核"
+                    "签字", "签章", "批准", "审核", "编制", "评审意见", "签发意见", "日期"
                 ],
                 "context_length": 800,
-                "image_keywords": ["签字", "签章", "签名", "盖章", "签字页"],
+                "image_keywords": [
+                    "签字", "签章", "签名", "盖章", "签字页",
+                    "编制", "审核", "批准", "评审意见", "签发意见",
+                    "年", "月", "日", "校对", "评审组长", "单位"
+                ],
                 "type": "multimodal_signature"
             },
             "emergency_evac": {
@@ -528,7 +532,7 @@ class RAGScoringEngine:
                         break
 
         logger.info(
-            f"多模态评分将发送 {len(selected)} 张图片至模型（limit={limit}，文档共有 {len(document.images)} 张，关键词={keywords}）。"
+            f"多模态评分将发送 {len(selected)} 张图片至模型（limit={limit}，文档共有 {len(document.images)} 张，关键词={keywords}）。首图base64长度={len(selected[0]) if selected else 0}"
         )
         return selected
 
@@ -593,7 +597,8 @@ class RAGScoringEngine:
         return {"score": score, "reasoning": reasoning, "evaluation_focus": "入场/疏散路线与集合点标注充分性", "images_used": images, "images_count": len(images), "total_images_in_document": len(document.images)}
 
     def _score_signature_multimodal(self, document: StandardizedDocument, context: str, max_score: int, config: Dict[str, Any]) -> Dict[str, Any]:
-        images = self._select_images(document, config.get("image_keywords", []), limit=3)
+        # 对签字类评分项：尽量多发（上限提到5），并把最相关的排到最前
+        images = self._select_images(document, config.get("image_keywords", []), limit=5)
         if not images:
             return {"score": 0, "reasoning": "未找到签字/签章相关图片", "evaluation_focus": "签字盖章页完整性", "images_used": [], "images_count": 0, "total_images_in_document": len(document.images)}
         prompt = self.scoring_prompts.get_signature_verification_prompt(context, max_score)
