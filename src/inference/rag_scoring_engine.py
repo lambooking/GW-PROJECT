@@ -6,6 +6,9 @@ import json
 import logging
 from datetime import datetime
 from typing import Dict, Any, List, Optional
+import base64
+import cv2
+import numpy as np
 from concurrent.futures import ThreadPoolExecutor
 import time
 
@@ -476,36 +479,107 @@ class RAGScoringEngine:
 
     # ========== 多模态场景二辅助方法 ==========
     def _select_images(self, document: StandardizedDocument, keywords: List[str], limit: int = 3) -> List[str]:
-        """基于关键词与OCR结果优选相关图片；若未命中则回退为前N张。"""
+        """基于关键词与OCR结果优选相关图片；若未命中则回退为前N张。
+        对签字/签章类评分项增加CV启发式优先级（红章/表格线密集度）。
+        """
         selected: List[str] = []
         normalized_keywords = [k.lower() for k in (keywords or [])]
+        is_signature_task = any(k in ("签字签章签名盖章签字页") for k in normalized_keywords)
 
-        # 1) 先按OCR文本匹配关键词
+        # 1) 先按OCR文本匹配关键词（并按命中+CV分数排序）
         if normalized_keywords:
+            scored_images = []
             for img in document.images:
                 if not img.base64_data:
                     continue
                 ocr_text = (img.extracted_text or "").lower()
-                if any(k in ocr_text for k in normalized_keywords):
-                    selected.append(img.base64_data)
-                    if len(selected) >= limit:
-                        break
+                hit = sum(1 for k in normalized_keywords if k in ocr_text)
+                cv_bonus = self._estimate_signature_relevance(img.base64_data) if is_signature_task else 0.0
+                scored_images.append((hit + cv_bonus, img.base64_data))
+
+            scored_images.sort(key=lambda x: x[0], reverse=True)
+            for score, b64 in scored_images:
+                if score <= 0:
+                    continue
+                selected.append(b64)
+                if len(selected) >= limit:
+                    break
 
         # 2) 若未选满，则回退补齐到limit
         if len(selected) < limit:
-            for img in document.images:
-                if not img.base64_data:
-                    continue
-                if img.base64_data in selected:
-                    continue
-                selected.append(img.base64_data)
-                if len(selected) >= limit:
-                    break
+            if is_signature_task:
+                scored_fallback = []
+                for img in document.images:
+                    if not img.base64_data or img.base64_data in selected:
+                        continue
+                    score = self._estimate_signature_relevance(img.base64_data)
+                    scored_fallback.append((score, img.base64_data))
+                scored_fallback.sort(key=lambda x: x[0], reverse=True)
+                for score, b64 in scored_fallback:
+                    selected.append(b64)
+                    if len(selected) >= limit:
+                        break
+            else:
+                for img in document.images:
+                    if not img.base64_data or img.base64_data in selected:
+                        continue
+                    selected.append(img.base64_data)
+                    if len(selected) >= limit:
+                        break
 
         logger.info(
             f"多模态评分将发送 {len(selected)} 张图片至模型（limit={limit}，文档共有 {len(document.images)} 张，关键词={keywords}）。"
         )
         return selected
+
+    def _estimate_signature_relevance(self, image_base64: str) -> float:
+        """估计图片与签字/签章页的相关性分数（0~1）。
+        简单启发式：红色像素占比（盖章）+ 横竖线密度（表单版式）。
+        """
+        try:
+            if image_base64.startswith("data:image"):
+                b64 = image_base64.split(",", 1)[-1]
+            else:
+                b64 = image_base64
+            img_bytes = base64.b64decode(b64)
+            np_arr = np.frombuffer(img_bytes, np.uint8)
+            img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+            if img is None:
+                return 0.0
+
+            h, w = img.shape[:2]
+            if h == 0 or w == 0:
+                return 0.0
+
+            # 红色占比
+            hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+            lower_red1 = np.array([0, 80, 80])
+            upper_red1 = np.array([10, 255, 255])
+            lower_red2 = np.array([170, 80, 80])
+            upper_red2 = np.array([180, 255, 255])
+            mask1 = cv2.inRange(hsv, lower_red1, upper_red1)
+            mask2 = cv2.inRange(hsv, lower_red2, upper_red2)
+            red_ratio = (np.count_nonzero(mask1) + np.count_nonzero(mask2)) / float(h * w)
+
+            # 线密度
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            edges = cv2.Canny(gray, 80, 180)
+            lines = cv2.HoughLinesP(edges, 1, np.pi / 180, threshold=100, minLineLength=min(w, h) * 0.2, maxLineGap=10)
+            line_count = 0 if lines is None else len(lines)
+            line_density = min(1.0, line_count / 20.0)
+
+            # 白底占比（签批表通常为白纸黑字）
+            white_mask = cv2.inRange(gray, 230, 255)
+            white_ratio = np.count_nonzero(white_mask) / float(h * w)
+
+            # 版式方向（竖版更常见）
+            portrait_boost = 0.15 if (h / max(1, w)) > 1.1 else 0.0
+
+            score = red_ratio * 6.0 + line_density * 0.6 + white_ratio * 0.4 + portrait_boost
+            score = float(min(1.0, score))
+            return float(score)
+        except Exception:
+            return 0.0
 
 
 
