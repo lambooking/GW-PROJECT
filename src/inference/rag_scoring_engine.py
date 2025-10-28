@@ -640,6 +640,11 @@ class RAGScoringEngine:
         # 3) 调用多模态模型
         response = self.vllm_client.multimodal_analysis(prompt, images_base64=images_to_send, max_tokens=800)
         
+        logger.info("=" * 80)
+        logger.info("多模态模型原始响应（签字分析）：")
+        logger.info(response)
+        logger.info("=" * 80)
+        
         # 4) 解析模型响应，提取角色/姓名/日期
         sig_info = self._parse_signature_response(response)
         
@@ -704,16 +709,50 @@ class RAGScoringEngine:
         result = {}
         roles = ["编制", "审核", "批准", "校对"]
         
-        for role in roles:
-            # 查找该角色的信息
-            pattern = rf"{role}[：:\s]*([\u4e00-\u9fa5]{{2,4}})?\s*[，,]?\s*(20\d{{2}}[年/-]?\d{{1,2}}[月/-]?\d{{1,2}}[日]?)?"
-            match = re.search(pattern, response)
-            if match:
-                name = match.group(1) if match.lastindex >= 1 else None
-                date = match.group(2) if match.lastindex >= 2 else None
-                if name or date:
-                    result[role] = {"name": name, "date": date, "confidence": 0.7}
+        logger.info(f"开始解析签字响应，原始响应长度：{len(response)}")
         
+        for role in roles:
+            # 先查找明确的"未找到"标记
+            not_found_pattern = rf"{role}[：:\s]*[未]?找[不]?到"
+            if re.search(not_found_pattern, response, re.IGNORECASE):
+                logger.debug(f"{role}: 模型明确标记为未找到")
+                continue
+            
+            # 查找该角色的信息（增强匹配，支持更多格式）
+            # 格式1: 编制：张三，2024年7月24日
+            pattern1 = rf"{role}[：:\s]+([\u4e00-\u9fa5]{{2,4}})\s*[，,]\s*(20\d{{2}}[年/-]\d{{1,2}}[月/-]\d{{1,2}}[日]?)"
+            match1 = re.search(pattern1, response)
+            
+            # 格式2: 编制：张三 (无日期)
+            pattern2 = rf"{role}[：:\s]+([\u4e00-\u9fa5]{{2,4}})(?:\s|$|，|。)"
+            match2 = re.search(pattern2, response)
+            
+            # 格式3: 编制：2024年7月24日 (仅日期)
+            pattern3 = rf"{role}[：:\s]+(20\d{{2}}[年/-]\d{{1,2}}[月/-]\d{{1,2}}[日]?)"
+            match3 = re.search(pattern3, response)
+            
+            name = None
+            date = None
+            
+            if match1:
+                name = match1.group(1)
+                date = match1.group(2)
+                logger.info(f"✓ {role}: 姓名={name}, 日期={date} (格式1)")
+            elif match2:
+                name = match2.group(1)
+                # 检查是否为常见的非姓名词汇
+                if name not in ["未找", "找到", "清晰", "图片", "页面", "签字", "盖章"]:
+                    logger.info(f"✓ {role}: 姓名={name} (格式2)")
+                else:
+                    continue
+            elif match3:
+                date = match3.group(1)
+                logger.info(f"✓ {role}: 日期={date} (格式3)")
+            
+            if name or date:
+                result[role] = {"name": name, "date": date, "confidence": 0.7}
+        
+        logger.info(f"签字解析完成，识别到 {len(result)} 个角色: {list(result.keys())}")
         return result
     
     def _parse_date_str(self, date_str: Optional[str]) -> Optional[datetime]:
