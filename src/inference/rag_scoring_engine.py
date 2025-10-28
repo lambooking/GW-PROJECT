@@ -602,7 +602,7 @@ class RAGScoringEngine:
         return {"score": score, "reasoning": reasoning, "evaluation_focus": "入场/疏散路线与集合点标注充分性", "images_used": images, "images_count": len(images), "total_images_in_document": len(document.images)}
 
     def _score_signature_multimodal(self, document: StandardizedDocument, context: str, max_score: int, config: Dict[str, Any]) -> Dict[str, Any]:
-        """签字盖章评分：仅在封面/前两页（扩展到第3页）进行检测与一致性校验。
+        """签字盖章评分：直接让多模态大模型分析封面/前两页签字，解析角色/日期/姓名并做一致性校验。
 
         评分构成（总分 max_score）：
         - 覆盖度 50%：编制/审核/批准三角色覆盖情况
@@ -610,131 +610,125 @@ class RAGScoringEngine:
         - 一致性 20%：姓名/日期与文本/表格元数据一致
         """
 
-        # 1) 仅封面前3页抽取签字信息
+        # 1) 优选封面前3页的图片发送给多模态模型
         pages_conf = config.get("pages", [1, 2, 3])
-        sig_records = self.signature_extractor.extract_signatures_from_cover_pages(document, max_pages=max(pages_conf) if pages_conf else 3)
+        # 过滤前3页图片
+        cover_images = [
+            img for img in (document.images or [])
+            if isinstance(img.page_number, int) and img.page_number <= max(pages_conf)
+        ]
+        
+        # 如果前3页有图片，优先使用；否则使用全部图片
+        if cover_images:
+            images_to_send = [img.base64_data for img in cover_images[:5] if img.base64_data]
+        else:
+            images_to_send = self._select_images(document, config.get("image_keywords", []), limit=5)
+        
+        if not images_to_send:
+            return {
+                "score": 0,
+                "reasoning": "未找到签字页图片",
+                "evaluation_focus": "签字页存在性",
+                "signature_summary": {"coverage": 0, "roles": {}, "date_order_ok": None, "consistency_ok": None},
+                "images_count": 0,
+                "total_images_in_document": len(document.images)
+            }
 
-        # 若未检测到签字候选，回退到文本上下文解析（签字多为扫描，但不少文档在正文也出现“编制/审核/批准”行）
-        if not sig_records:
-            context_roles = self._parse_signature_roles_from_context(context)
-            if not context_roles:
-                return {
-                    "score": 0,
-                    "reasoning": "前3页未检测到签字候选，且上下文未解析到编制/审核/批准信息",
-                    "evaluation_focus": "签字页存在性与要素完整",
-                    "signature_summary": {"coverage": 0, "roles": {}, "date_order_ok": None, "consistency_ok": None},
-                    "images_count": len(document.images),
-                    "total_images_in_document": len(document.images)
-                }
-            # 将上下文解析结果转为记录以统一后续打分
-            for role, info in context_roles.items():
-                sig_records.append(type("_Tmp", (), {
-                    "page": 0,
-                    "bbox": (0, 0, 0, 0),
-                    "role": role,
-                    "name": info.get("name"),
-                    "date": info.get("date"),
-                    "confidence": 0.51,
-                }))
-
-        # 2) 结构化角色->最新记录（按置信度挑高者）
-        role_to_best: Dict[str, Tuple[float, Any]] = {}
-        for r in sig_records:
-            key = (r.role or "")
-            if not key:
-                continue
-            if key not in role_to_best or r.confidence > role_to_best[key][0]:
-                role_to_best[key] = (r.confidence, r)
-
-        have_roles = set(role_to_best.keys())
+        # 2) 构造结构化Prompt，要求模型返回角色信息
+        prompt = self.scoring_prompts.get_signature_verification_with_details_prompt(context, max_score)
+        
+        # 3) 调用多模态模型
+        response = self.vllm_client.multimodal_analysis(prompt, images_base64=images_to_send, max_tokens=800)
+        
+        # 4) 解析模型响应，提取角色/姓名/日期
+        sig_info = self._parse_signature_response(response)
+        
+        # 5) 计算覆盖度
         needed = {"编制", "审核", "批准"}
-        covered = needed & have_roles
+        covered = set(sig_info.keys()) & needed
         coverage_ratio = len(covered) / len(needed)
-
-        # 3) 日期时序
-        def parse_date(d: Optional[str]) -> Optional[datetime]:
-            if not d:
-                return None
-            try:
-                d = d.replace("年", "-").replace("月", "-").replace("日", "").replace("/", "-")
-                parts = [p for p in d.split("-") if p]
-                if len(parts) >= 3:
-                    y, m, dd = int(parts[0]), int(parts[1]), int(parts[2])
-                    return datetime(y, m, dd)
-                return None
-            except Exception:
-                return None
-
-        dates = {role: parse_date(getattr(role_to_best[role][1], "date", None)) for role in covered}
+        
+        # 6) 检查日期时序
         date_order_ok = None
-        if all(role in dates and dates[role] is not None for role in ["编制", "审核", "批准"] if role in covered):
-            seq = [dates.get("编制"), dates.get("审核"), dates.get("批准")]
-            seq = [d for d in seq if d is not None]
-            date_order_ok = all(seq[i] <= seq[i + 1] for i in range(len(seq) - 1))
-
-        # 4) 与文本/表格元数据一致性（姓名/日期）——简化：在上下文中查找姓名/日期字符串
+        if all(role in sig_info and sig_info[role].get("date") for role in ["编制", "审核", "批准"]):
+            dates = {role: self._parse_date_str(sig_info[role]["date"]) for role in ["编制", "审核", "批准"]}
+            if all(dates.values()):
+                date_order_ok = dates["编制"] <= dates["审核"] <= dates["批准"]
+        
+        # 7) 检查一致性（姓名/日期在上下文中出现）
         context_text = context[:2000]
         consistency_hits = 0
         consistency_checks = 0
         for role in covered:
-            rec = role_to_best[role][1]
-            if rec.name:
+            info = sig_info[role]
+            if info.get("name"):
                 consistency_checks += 1
-                if rec.name in context_text:
+                if info["name"] in context_text:
                     consistency_hits += 1
-            if rec.date:
+            if info.get("date"):
                 consistency_checks += 1
-                if rec.date.replace(" ", "") in context_text.replace(" ", ""):
+                date_normalized = info["date"].replace(" ", "").replace("年", "-").replace("月", "-").replace("日", "")
+                if date_normalized in context_text.replace(" ", ""):
                     consistency_hits += 1
-        consistency_ok = (consistency_hits / consistency_checks) >= 0.6 if consistency_checks > 0 else None
-
-        # 5) 计分
+        consistency_ok = (consistency_hits / consistency_checks) >= 0.5 if consistency_checks > 0 else None
+        
+        # 8) 计算最终得分
         coverage_score = coverage_ratio * (max_score * 0.5)
-        order_score = (max_score * 0.3) if (date_order_ok is True) else 0
-        consistency_score = (max_score * 0.2) if (consistency_ok is True) else 0
+        order_score = (max_score * 0.3) if (date_order_ok is True) else ((max_score * 0.15) if date_order_ok is None else 0)
+        consistency_score = (max_score * 0.2) if (consistency_ok is True) else ((max_score * 0.1) if consistency_ok is None else 0)
         score = int(round(coverage_score + order_score + consistency_score))
-
+        
         reasoning_parts = [
             f"角色覆盖：{len(covered)}/3（{sorted(list(covered))}）",
-            f"日期时序：{'正常' if date_order_ok else ('无法判定' if date_order_ok is None else '异常')}",
-            f"文本一致性：{'通过' if consistency_ok else ('无法判定' if consistency_ok is None else '未通过')}"
+            f"日期时序：{'✓正常' if date_order_ok else ('无法判定' if date_order_ok is None else '✗异常')}",
+            f"文本一致性：{'✓通过' if consistency_ok else ('无法判定' if consistency_ok is None else '✗未通过')}"
         ]
-
+        
         return {
             "score": min(score, max_score),
-            "reasoning": "；".join(reasoning_parts),
+            "reasoning": "；".join(reasoning_parts) + f"。{response[:150]}",
             "evaluation_focus": "封面/前两页签字要素覆盖、日期时序与一致性",
             "signature_summary": {
                 "coverage": coverage_ratio,
-                "roles": {r: {
-                    "name": getattr(role_to_best[r][1], "name", None),
-                    "date": getattr(role_to_best[r][1], "date", None),
-                    "confidence": role_to_best[r][0]
-                } for r in covered},
+                "roles": {r: sig_info[r] for r in covered},
                 "date_order_ok": date_order_ok,
                 "consistency_ok": consistency_ok
             },
+            "images_used": images_to_send,
+            "images_count": len(images_to_send),
+            "total_images_in_document": len(document.images)
         }
-
-    def _parse_signature_roles_from_context(self, context: str) -> Dict[str, Dict[str, Optional[str]]]:
-        """从文本上下文解析签字角色、姓名与日期（回退路径）。"""
-        if not context:
-            return {}
-        text = re.sub(r"\s+", " ", context)
-        patterns = {
-            "编制": r"编制[：: ]*([\u4e00-\u9fa5]{2,4})?.{0,20}?((?:20\d{2}[年/-]?\d{1,2}[月/-]?\d{1,2}日?))?",
-            "审核": r"审核[：: ]*([\u4e00-\u9fa5]{2,4})?.{0,20}?((?:20\d{2}[年/-]?\d{1,2}[月/-]?\d{1,2}日?))?",
-            "批准": r"批准[：: ]*([\u4e00-\u9fa5]{2,4})?.{0,20}?((?:20\d{2}[年/-]?\d{1,2}[月/-]?\d{1,2}日?))?",
-        }
-        result: Dict[str, Dict[str, Optional[str]]] = {}
-        for role, pat in patterns.items():
-            m = re.search(pat, text)
-            if m:
-                name = m.group(1) if len(m.groups()) >= 1 else None
-                date = m.group(2) if len(m.groups()) >= 2 else None
+    
+    def _parse_signature_response(self, response: str) -> Dict[str, Dict[str, Optional[str]]]:
+        """从多模态模型响应中解析签字角色/姓名/日期。"""
+        result = {}
+        roles = ["编制", "审核", "批准", "校对"]
+        
+        for role in roles:
+            # 查找该角色的信息
+            pattern = rf"{role}[：:\s]*([\u4e00-\u9fa5]{{2,4}})?\s*[，,]?\s*(20\d{{2}}[年/-]?\d{{1,2}}[月/-]?\d{{1,2}}[日]?)?"
+            match = re.search(pattern, response)
+            if match:
+                name = match.group(1) if match.lastindex >= 1 else None
+                date = match.group(2) if match.lastindex >= 2 else None
                 if name or date:
-                    result[role] = {"name": name, "date": date}
+                    result[role] = {"name": name, "date": date, "confidence": 0.7}
+        
         return result
+    
+    def _parse_date_str(self, date_str: Optional[str]) -> Optional[datetime]:
+        """解析日期字符串为datetime对象。"""
+        if not date_str:
+            return None
+        try:
+            d = date_str.replace("年", "-").replace("月", "-").replace("日", "").replace("/", "-").replace(" ", "")
+            parts = [p for p in d.split("-") if p]
+            if len(parts) >= 3:
+                y, m, dd = int(parts[0]), int(parts[1]), int(parts[2])
+                return datetime(y, m, dd)
+            return None
+        except Exception:
+            return None
 
     def _score_hca_multimodal(self, document: StandardizedDocument, context: str, max_score: int, config: Dict[str, Any]) -> Dict[str, Any]:
         images = self._select_images(document, config.get("image_keywords", []), limit=3)
