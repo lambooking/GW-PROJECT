@@ -614,27 +614,61 @@ class RAGScoringEngine:
         pages_conf = config.get("pages", [1, 2, 3])
         max_page = max(pages_conf) if pages_conf else 3
         
-        # 过滤前3页图片，并按页码排序
+        # 过滤前3页图片
         cover_images = [
             img for img in (document.images or [])
             if isinstance(img.page_number, int) and img.page_number <= max_page
         ]
-        # 按页码排序，确保顺序正确
-        cover_images.sort(key=lambda x: x.page_number)
         
         logger.info(f"签字评分：文档共 {len(document.images)} 张图片")
-        logger.info(f"签字评分：前{max_page}页共 {len(cover_images)} 张图片")
-        for idx, img in enumerate(cover_images[:10]):  # 只打印前10张
-            ocr_preview = (img.extracted_text or "")[:50]
-            logger.info(f"  图片{idx+1}: 第{img.page_number}页, OCR文本预览: {ocr_preview}...")
+        logger.info(f"签字评分：前{max_page}页原始图片数: {len(cover_images)}")
+        
+        # 按页码排序，同页内优先选择包含签字关键词的图片
+        def get_image_priority(img):
+            page = img.page_number
+            # 优先级：签字关键词越多越高
+            priority = 0
+            ocr_text = (img.extracted_text or "").lower()
+            signature_keywords = ["编制", "审核", "批准", "校对", "签字", "签章", "盖章", "评审意见"]
+            keyword_hits = sum(1 for kw in signature_keywords if kw in ocr_text)
+            
+            # 检查是否为整页快照（通过image_id或文件名判断）
+            image_id = getattr(img, 'image_id', '')
+            is_full_page = '_full' in image_id or 'page_' in image_id
+            
+            if is_full_page:
+                priority = 1000 + keyword_hits * 10  # 整页快照最高优先级
+            else:
+                priority = keyword_hits * 100  # 关键词越多优先级越高
+            
+            return (-page, -priority)  # 负号使得页码小的在前，优先级高的在前
+        
+        cover_images.sort(key=get_image_priority)
+        
+        # 去重：每页最多保留2张（优先级高的）
+        page_image_count = {}
+        filtered_images = []
+        for img in cover_images:
+            page = img.page_number
+            count = page_image_count.get(page, 0)
+            if count < 2:  # 每页最多2张
+                filtered_images.append(img)
+                page_image_count[page] = count + 1
+        
+        logger.info(f"签字评分：过滤后保留 {len(filtered_images)} 张图片（每页最多2张）")
+        for idx, img in enumerate(filtered_images[:10]):
+            ocr_preview = (img.extracted_text or "")[:80].replace("\n", " ")
+            image_id = getattr(img, 'image_id', '')
+            is_full = "✓整页" if '_full' in image_id or 'page_' in image_id else ""
+            logger.info(f"  图{idx+1}: 第{img.page_number}页 {is_full} [{image_id}], OCR: {ocr_preview}...")
         
         # 如果前3页有图片，优先使用；否则使用全部图片
-        if cover_images:
-            images_to_send = [img.base64_data for img in cover_images[:5] if img.base64_data]
+        if filtered_images:
+            images_to_send = [img.base64_data for img in filtered_images[:5] if img.base64_data]
         else:
             images_to_send = self._select_images(document, config.get("image_keywords", []), limit=5)
         
-        logger.info(f"签字评分：将发送 {len(images_to_send)} 张图片给多模态模型")
+        logger.info(f"签字评分：实际发送 {len(images_to_send)} 张图片给多模态模型")
         
         if not images_to_send:
             return {

@@ -291,10 +291,19 @@ class PreprocessingPipeline:
                     ocr_text = self.docx_parser.extract_text_from_image(img_data) or ""
             except Exception:
                 ocr_text = ""
+            
+            # 生成 image_id：如果是整页快照，使用特殊标记
+            filename = item.get("filename", "")
+            is_full_page = item.get("is_full_page", False)
+            if is_full_page or "_full" in filename:
+                page_num = item.get("page_number", i+1)
+                image_id = f"page_{page_num}_full"
+            else:
+                image_id = f"img_{i+1}"
 
             standardized.append(
                 Image(
-                    image_id=f"img_{i+1}",
+                    image_id=image_id,
                     base64_data=base64_str,
                     extracted_text=ocr_text,
                     page_number=item.get("page_number", 0) # docx无页码信息
