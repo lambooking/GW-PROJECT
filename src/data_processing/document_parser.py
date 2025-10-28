@@ -64,22 +64,62 @@ class DocumentParser:
                 'data': table_data
             })
         
-        # 解析图片（从文档关系中提取）
-        image_rels = [
-            rel for rel in doc.part.rels.values()
-            if "image" in rel.target_ref
-        ]
+        # 改进的图片提取：按文档流顺序遍历所有元素
+        # 这样可以确保图片顺序与文档中的实际出现顺序一致
+        image_counter = 0
+        seen_image_ids = set()  # 用于去重
         
-        for idx, rel in enumerate(image_rels):
-            try:
-                image_data = rel.target_part.blob
-                images.append({
-                    'data': image_data,
-                    'filename': rel.target_ref.split('/')[-1],
-                    'page_number': idx + 1  # 按提取顺序分配页码，前3张对应前3页（签字页常见位置）
-                })
-            except Exception as e:
-                logger.warning(f"无法提取图片 '{rel.target_ref}': {e}")
+        # 遍历文档中的所有元素（段落和表格按文档顺序混合）
+        for element in doc.element.body:
+            # 检查段落中的图片
+            if element.tag.endswith('p'):  # 段落
+                for run in element.findall('.//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}r'):
+                    for drawing in run.findall('.//{http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing}inline'):
+                        # 提取图片关系ID
+                        blip = drawing.find('.//{http://schemas.openxmlformats.org/drawingml/2006/main}blip')
+                        if blip is not None:
+                            embed_id = blip.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed')
+                            if embed_id and embed_id not in seen_image_ids:
+                                try:
+                                    image_part = doc.part.related_parts[embed_id]
+                                    image_data = image_part.blob
+                                    image_counter += 1
+                                    images.append({
+                                        'data': image_data,
+                                        'filename': image_part.partname.split('/')[-1],
+                                        'page_number': image_counter,  # 按文档流顺序分配页码
+                                        'embed_id': embed_id
+                                    })
+                                    seen_image_ids.add(embed_id)
+                                    logger.debug(f"提取图片 {image_counter}: {embed_id}")
+                                except Exception as e:
+                                    logger.warning(f"提取图片 {embed_id} 失败: {e}")
+            
+            # 检查表格单元格中的图片
+            elif element.tag.endswith('tbl'):  # 表格
+                for cell in element.findall('.//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc'):
+                    for run in cell.findall('.//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}r'):
+                        for drawing in run.findall('.//{http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing}inline'):
+                            blip = drawing.find('.//{http://schemas.openxmlformats.org/drawingml/2006/main}blip')
+                            if blip is not None:
+                                embed_id = blip.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed')
+                                if embed_id and embed_id not in seen_image_ids:
+                                    try:
+                                        image_part = doc.part.related_parts[embed_id]
+                                        image_data = image_part.blob
+                                        image_counter += 1
+                                        images.append({
+                                            'data': image_data,
+                                            'filename': image_part.partname.split('/')[-1],
+                                            'page_number': image_counter,
+                                            'embed_id': embed_id
+                                        })
+                                        seen_image_ids.add(embed_id)
+                                        logger.debug(f"提取表格中的图片 {image_counter}: {embed_id}")
+                                    except Exception as e:
+                                        logger.warning(f"提取表格图片 {embed_id} 失败: {e}")
+        
+        logger.info(f"DOCX图片提取完成：共 {image_counter} 张图片，按文档顺序排列")
         
         # 计算页数（这是一个估算值，python-docx不直接提供页数）
         total_pages = 0
