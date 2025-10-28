@@ -623,7 +623,10 @@ class RAGScoringEngine:
             )
         ]
         
-        logger.info(f"签字评分：文档类型={getattr(document.doc_info, 'file_type', 'unknown')}, 文档共 {len(document.images)} 张图片")
+        # 从文件名推断文档类型
+        file_name = getattr(document.document_info, 'file_name', '')
+        file_type = 'docx' if file_name.lower().endswith('.docx') else ('pdf' if file_name.lower().endswith('.pdf') else 'unknown')
+        logger.info(f"签字评分：文档类型={file_type}, 文档共 {len(document.images)} 张图片")
         logger.info(f"签字评分：前{max_page}页原始图片数: {len(cover_images)} (包含page_number=0的图片)")
         
         # 按页码排序，同页内优先选择包含签字关键词的图片
