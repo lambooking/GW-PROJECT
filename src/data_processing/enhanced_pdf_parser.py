@@ -60,6 +60,24 @@ class EnhancedPDFParser:
                 # 提取图片
                 page_images = self._extract_images_from_page(page_mupdf, doc_mupdf, page_num + 1)
                 images.extend(page_images)
+
+                # 追加：为前3页渲染整页快照，确保签字页（封面/前两页）始终有图像可用于多模态/签字检测
+                try:
+                    if page_num < 3:  # 仅前3页
+                        snap = page_mupdf.get_pixmap(dpi=144)
+                        img_data = snap.tobytes("png")
+                        images.append({
+                            'page_number': page_num + 1,
+                            'image_index': -1,
+                            'data': img_data,
+                            'filename': f"page_{page_num + 1}_full.png",
+                            'width': snap.width,
+                            'height': snap.height,
+                            'size_bytes': len(img_data),
+                            'is_full_page': True
+                        })
+                except Exception as e:
+                    logger.warning(f"无法渲染第{page_num + 1}页整页快照: {e}")
             
             total_pages = len(doc_mupdf)
             doc_mupdf.close()

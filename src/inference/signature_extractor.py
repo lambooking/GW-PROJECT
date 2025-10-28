@@ -70,6 +70,21 @@ class SignatureExtractor:
             try:
                 image_bytes = base64.b64decode(img.base64_data)
 
+                # 0) 直接基于该页已有的OCR文本抽取角色/日期/姓名（很多签字页为整页扫描，整页OCR已在预处理完成）
+                if getattr(img, "extracted_text", None):
+                    parsed_from_page = self._parse_from_text(img.extracted_text)
+                    for item in parsed_from_page:
+                        records.append(
+                            SignatureRecord(
+                                page=img.page_number,
+                                bbox=(0, 0, 0, 0),
+                                role=item.get("role"),
+                                name=item.get("name"),
+                                date=item.get("date"),
+                                confidence=0.6,
+                            )
+                        )
+
                 # 1) 先对整页检测候选签字区域
                 candidates = self.detector.detect_multiple_signatures(image_bytes) or []
 
@@ -218,6 +233,24 @@ class SignatureExtractor:
         # 支持 2024-09-30 / 2024/09/30 / 2024年9月30日
         m = re.search(r"(20\d{2}[-/年] ?\d{1,2}[-/月] ?\d{1,2}(?:日)?)", text)
         return m.group(1) if m else None
+
+    def _parse_from_text(self, text: str) -> List[Dict[str, Optional[str]]]:
+        """直接从整页OCR文本抽取签字角色/姓名/日期（不依赖候选框）。"""
+        if not text:
+            return []
+        result: List[Dict[str, Optional[str]]] = []
+        # 归一化：去空白，保留分隔
+        norm = re.sub(r"[\t\r]", " ", text)
+        # 逐角色解析
+        for role, aliases in ROLE_ALIASES.items():
+            role_pat = r"(?:" + "|".join(map(re.escape, aliases)) + r")[：: ]*([\u4e00-\u9fa5]{2,4})?.{0,20}?((?:20\d{2}[年/-]?\d{1,2}[月/-]?\d{1,2}日?))?"
+            m = re.search(role_pat, norm)
+            if m:
+                name = m.group(1) if len(m.groups()) >= 1 else None
+                date = m.group(2) if len(m.groups()) >= 2 else None
+                if name or date:
+                    result.append({"role": role, "name": name, "date": date})
+        return result
 
 
 __all__ = ["SignatureExtractor", "SignatureRecord"]

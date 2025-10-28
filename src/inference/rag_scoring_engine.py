@@ -614,15 +614,28 @@ class RAGScoringEngine:
         pages_conf = config.get("pages", [1, 2, 3])
         sig_records = self.signature_extractor.extract_signatures_from_cover_pages(document, max_pages=max(pages_conf) if pages_conf else 3)
 
+        # 若未检测到签字候选，回退到文本上下文解析（签字多为扫描，但不少文档在正文也出现“编制/审核/批准”行）
         if not sig_records:
-            return {
-                "score": 0,
-                "reasoning": "前3页未检测到有效签字/盖章候选",
-                "evaluation_focus": "签字页存在性与要素完整",
-                "signature_summary": {"coverage": 0, "roles": {}, "date_order_ok": None, "consistency_ok": None},
-                "images_count": len(document.images),
-                "total_images_in_document": len(document.images)
-            }
+            context_roles = self._parse_signature_roles_from_context(context)
+            if not context_roles:
+                return {
+                    "score": 0,
+                    "reasoning": "前3页未检测到签字候选，且上下文未解析到编制/审核/批准信息",
+                    "evaluation_focus": "签字页存在性与要素完整",
+                    "signature_summary": {"coverage": 0, "roles": {}, "date_order_ok": None, "consistency_ok": None},
+                    "images_count": len(document.images),
+                    "total_images_in_document": len(document.images)
+                }
+            # 将上下文解析结果转为记录以统一后续打分
+            for role, info in context_roles.items():
+                sig_records.append(type("_Tmp", (), {
+                    "page": 0,
+                    "bbox": (0, 0, 0, 0),
+                    "role": role,
+                    "name": info.get("name"),
+                    "date": info.get("date"),
+                    "confidence": 0.51,
+                }))
 
         # 2) 结构化角色->最新记录（按置信度挑高者）
         role_to_best: Dict[str, Tuple[float, Any]] = {}
@@ -702,6 +715,26 @@ class RAGScoringEngine:
                 "consistency_ok": consistency_ok
             },
         }
+
+    def _parse_signature_roles_from_context(self, context: str) -> Dict[str, Dict[str, Optional[str]]]:
+        """从文本上下文解析签字角色、姓名与日期（回退路径）。"""
+        if not context:
+            return {}
+        text = re.sub(r"\s+", " ", context)
+        patterns = {
+            "编制": r"编制[：: ]*([\u4e00-\u9fa5]{2,4})?.{0,20}?((?:20\d{2}[年/-]?\d{1,2}[月/-]?\d{1,2}日?))?",
+            "审核": r"审核[：: ]*([\u4e00-\u9fa5]{2,4})?.{0,20}?((?:20\d{2}[年/-]?\d{1,2}[月/-]?\d{1,2}日?))?",
+            "批准": r"批准[：: ]*([\u4e00-\u9fa5]{2,4})?.{0,20}?((?:20\d{2}[年/-]?\d{1,2}[月/-]?\d{1,2}日?))?",
+        }
+        result: Dict[str, Dict[str, Optional[str]]] = {}
+        for role, pat in patterns.items():
+            m = re.search(pat, text)
+            if m:
+                name = m.group(1) if len(m.groups()) >= 1 else None
+                date = m.group(2) if len(m.groups()) >= 2 else None
+                if name or date:
+                    result[role] = {"name": name, "date": date}
+        return result
 
     def _score_hca_multimodal(self, document: StandardizedDocument, context: str, max_score: int, config: Dict[str, Any]) -> Dict[str, Any]:
         images = self._select_images(document, config.get("image_keywords", []), limit=3)
