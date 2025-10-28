@@ -81,6 +81,7 @@ class HTMLReportGenerator:
         {self._generate_header(doc_info, summary)}
         {self._generate_summary_section(doc_info, summary, score_percentages)}
         {self._generate_detailed_scores(detailed_scores, score_breakdown)}
+        {self._generate_signature_summary_card(detailed_scores)}
         {self._generate_score_visualization()}
         {self._generate_footer(report)}
     </div>
@@ -585,6 +586,37 @@ class HTMLReportGenerator:
         
         html += '</section>\n'
         return html
+
+    def _generate_signature_summary_card(self, detailed_scores: Dict[str, Any]) -> str:
+        """签字一致性摘要卡片（若存在签字评分项且包含 summary）。"""
+        sig = detailed_scores.get("signature_completeness") or {}
+        summary = sig.get("signature_summary")
+        if not summary:
+            return ""
+
+        coverage = summary.get("coverage", 0)
+        roles = summary.get("roles", {})
+        date_ok = summary.get("date_order_ok")
+        cons_ok = summary.get("consistency_ok")
+
+        date_badge = "✅ 正常" if date_ok is True else ("⚠️ 无法判定" if date_ok is None else "❌ 异常")
+        cons_badge = "✅ 通过" if cons_ok is True else ("⚠️ 无法判定" if cons_ok is None else "❌ 未通过")
+
+        role_items = "".join([
+            f"<li><strong>{r}</strong>：{info.get('name','未知')}，{info.get('date','无日期')}（置信度 {info.get('confidence',0):.2f}）</li>"
+            for r, info in roles.items()
+        ])
+
+        return f"""
+        <section class="summary-section">
+            <div class="summary-card">
+                <h3>🖋️ 签字与日期一致性摘要</h3>
+                <p style="margin-top:10px">覆盖度：<strong>{coverage:.0%}</strong></p>
+                <p>日期时序：{date_badge}；文本一致性：{cons_badge}</p>
+                <ul style="text-align:left; margin-top:10px; line-height:1.8">{role_items}</ul>
+            </div>
+        </section>
+        """
     
     def _format_reasoning(self, reasoning: str) -> str:
         """格式化评分理由文本"""

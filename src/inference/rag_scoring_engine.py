@@ -5,7 +5,8 @@
 import json
 import logging
 from datetime import datetime
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
+import re
 import base64
 import cv2
 import numpy as np
@@ -15,6 +16,7 @@ import time
 from .rag_knowledge_base import RAGKnowledgeBase
 from .vllm_client import VLLMInferenceClient
 from .prompts import ScoringPrompts
+from .signature_extractor import SignatureExtractor
 from ..data_processing.schemas import StandardizedDocument
 
 logger = logging.getLogger(__name__)
@@ -28,6 +30,8 @@ class RAGScoringEngine:
         self.vllm_client = vllm_client
         self.knowledge_base = knowledge_base
         self.scoring_prompts = ScoringPrompts()
+        # 封面签字抽取器（仅用于场景二签字评分）
+        self.signature_extractor = SignatureExtractor()
 
         
         # 场景一评分项配置（文本为主）
@@ -141,6 +145,7 @@ class RAGScoringEngine:
                     "签字", "签章", "批准", "审核", "编制", "评审意见", "签发意见", "日期"
                 ],
                 "context_length": 800,
+                "pages": [1, 2, 3],
                 "image_keywords": [
                     "签字", "签章", "签名", "盖章", "签字页",
                     "编制", "审核", "批准", "评审意见", "签发意见",
@@ -597,14 +602,106 @@ class RAGScoringEngine:
         return {"score": score, "reasoning": reasoning, "evaluation_focus": "入场/疏散路线与集合点标注充分性", "images_used": images, "images_count": len(images), "total_images_in_document": len(document.images)}
 
     def _score_signature_multimodal(self, document: StandardizedDocument, context: str, max_score: int, config: Dict[str, Any]) -> Dict[str, Any]:
-        # 对签字类评分项：尽量多发（上限提到5），并把最相关的排到最前
-        images = self._select_images(document, config.get("image_keywords", []), limit=5)
-        if not images:
-            return {"score": 0, "reasoning": "未找到签字/签章相关图片", "evaluation_focus": "签字盖章页完整性", "images_used": [], "images_count": 0, "total_images_in_document": len(document.images)}
-        prompt = self.scoring_prompts.get_signature_verification_prompt(context, max_score)
-        response = self.vllm_client.multimodal_analysis(prompt, images_base64=images, max_tokens=512)
-        score, reasoning = self.scoring_prompts.parse_simple_response(response, max_score)
-        return {"score": score, "reasoning": reasoning, "evaluation_focus": "签字角色齐全性与清晰度", "images_used": images, "images_count": len(images), "total_images_in_document": len(document.images)}
+        """签字盖章评分：仅在封面/前两页（扩展到第3页）进行检测与一致性校验。
+
+        评分构成（总分 max_score）：
+        - 覆盖度 50%：编制/审核/批准三角色覆盖情况
+        - 时序   30%：编制≤审核≤批准（若有日期）
+        - 一致性 20%：姓名/日期与文本/表格元数据一致
+        """
+
+        # 1) 仅封面前3页抽取签字信息
+        pages_conf = config.get("pages", [1, 2, 3])
+        sig_records = self.signature_extractor.extract_signatures_from_cover_pages(document, max_pages=max(pages_conf) if pages_conf else 3)
+
+        if not sig_records:
+            return {
+                "score": 0,
+                "reasoning": "前3页未检测到有效签字/盖章候选",
+                "evaluation_focus": "签字页存在性与要素完整",
+                "signature_summary": {"coverage": 0, "roles": {}, "date_order_ok": None, "consistency_ok": None},
+                "images_count": len(document.images),
+                "total_images_in_document": len(document.images)
+            }
+
+        # 2) 结构化角色->最新记录（按置信度挑高者）
+        role_to_best: Dict[str, Tuple[float, Any]] = {}
+        for r in sig_records:
+            key = (r.role or "")
+            if not key:
+                continue
+            if key not in role_to_best or r.confidence > role_to_best[key][0]:
+                role_to_best[key] = (r.confidence, r)
+
+        have_roles = set(role_to_best.keys())
+        needed = {"编制", "审核", "批准"}
+        covered = needed & have_roles
+        coverage_ratio = len(covered) / len(needed)
+
+        # 3) 日期时序
+        def parse_date(d: Optional[str]) -> Optional[datetime]:
+            if not d:
+                return None
+            try:
+                d = d.replace("年", "-").replace("月", "-").replace("日", "").replace("/", "-")
+                parts = [p for p in d.split("-") if p]
+                if len(parts) >= 3:
+                    y, m, dd = int(parts[0]), int(parts[1]), int(parts[2])
+                    return datetime(y, m, dd)
+                return None
+            except Exception:
+                return None
+
+        dates = {role: parse_date(getattr(role_to_best[role][1], "date", None)) for role in covered}
+        date_order_ok = None
+        if all(role in dates and dates[role] is not None for role in ["编制", "审核", "批准"] if role in covered):
+            seq = [dates.get("编制"), dates.get("审核"), dates.get("批准")]
+            seq = [d for d in seq if d is not None]
+            date_order_ok = all(seq[i] <= seq[i + 1] for i in range(len(seq) - 1))
+
+        # 4) 与文本/表格元数据一致性（姓名/日期）——简化：在上下文中查找姓名/日期字符串
+        context_text = context[:2000]
+        consistency_hits = 0
+        consistency_checks = 0
+        for role in covered:
+            rec = role_to_best[role][1]
+            if rec.name:
+                consistency_checks += 1
+                if rec.name in context_text:
+                    consistency_hits += 1
+            if rec.date:
+                consistency_checks += 1
+                if rec.date.replace(" ", "") in context_text.replace(" ", ""):
+                    consistency_hits += 1
+        consistency_ok = (consistency_hits / consistency_checks) >= 0.6 if consistency_checks > 0 else None
+
+        # 5) 计分
+        coverage_score = coverage_ratio * (max_score * 0.5)
+        order_score = (max_score * 0.3) if (date_order_ok is True) else 0
+        consistency_score = (max_score * 0.2) if (consistency_ok is True) else 0
+        score = int(round(coverage_score + order_score + consistency_score))
+
+        reasoning_parts = [
+            f"角色覆盖：{len(covered)}/3（{sorted(list(covered))}）",
+            f"日期时序：{'正常' if date_order_ok else ('无法判定' if date_order_ok is None else '异常')}",
+            f"文本一致性：{'通过' if consistency_ok else ('无法判定' if consistency_ok is None else '未通过')}"
+        ]
+
+        return {
+            "score": min(score, max_score),
+            "reasoning": "；".join(reasoning_parts),
+            "evaluation_focus": "封面/前两页签字要素覆盖、日期时序与一致性",
+            "signature_summary": {
+                "coverage": coverage_ratio,
+                "roles": {r: {
+                    "name": getattr(role_to_best[r][1], "name", None),
+                    "date": getattr(role_to_best[r][1], "date", None),
+                    "confidence": role_to_best[r][0]
+                } for r in covered},
+                "date_order_ok": date_order_ok,
+                "consistency_ok": consistency_ok
+            },
+        }
 
     def _score_hca_multimodal(self, document: StandardizedDocument, context: str, max_score: int, config: Dict[str, Any]) -> Dict[str, Any]:
         images = self._select_images(document, config.get("image_keywords", []), limit=3)

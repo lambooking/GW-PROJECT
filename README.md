@@ -128,6 +128,57 @@ python run_complete_rag_scoring.py document.docx instruction_book
 ls output/rag_scoring_reports/
 ```
 
+## 📖 使用 run_complete_rag_scoring.py 评分多格式文档
+
+系统支持 **PDF**、**DOCX**、**DOC** 三种文档格式的智能评分。
+
+### 🎯 快速使用
+
+```bash
+# 测试系统连接
+python run_complete_rag_scoring.py test
+
+# 评分 PDF 文件
+python run_complete_rag_scoring.py score data/raw/场景1\(1\).pdf
+
+# 评分 DOCX 文件
+python run_complete_rag_scoring.py score documents/instruction.docx
+
+# 评分 DOC 文件（需要安装 antiword）
+python run_complete_rag_scoring.py score documents/legacy.doc
+
+# 批量评分目录中的所有 PDF 文件
+python run_complete_rag_scoring.py batch data/raw/
+```
+
+### 📋 支持的格式
+
+| 格式 | 解析引擎 | 支持功能 | 备注 |
+|------|---------|---------|------|
+| **PDF** | PyMuPDF | 文本、表格、图片 | 推荐用于扫描文档 |
+| **DOCX** | python-docx | 段落、表格、图片、样式 | 推荐用于 Word 编辑文档 |
+| **DOC** | antiword | 文本提取 | 需安装 antiword 工具 |
+
+### 📊 输出结果
+
+评分完成后会生成两种格式的报告：
+
+- **JSON 报告**: `output/rag_scoring_reports/rag_scoring_report_<文档名>_<时间>.json`
+- **HTML 报告**: `output/rag_scoring_reports/html/rag_scoring_report_<文档名>_<时间>.html`
+
+### 📚 详细使用指南
+
+完整的使用说明、命令详解、常见问题和最佳实践，请参阅：
+
+👉 **[详细使用指南 (USAGE_GUIDE.md)](docs/USAGE_GUIDE.md)**
+
+包含内容：
+- ✅ 各格式详细说明和能力对比
+- ✅ 完整的命令行参数说明
+- ✅ 丰富的使用示例和场景
+- ✅ 常见问题排查和解决方案
+- ✅ 最佳实践和性能优化建议
+
 ## 📁 项目结构
 
 ```
@@ -169,6 +220,7 @@ GW-PROJECT/
 
 ### 详细文档
 - 📘 [重构架构说明](docs/README_NEW.md) - 模块化架构详细介绍
+- 📖 [使用指南](docs/USAGE_GUIDE.md) - 多格式文档评分完整使用指南 ⭐ **推荐阅读**
 - 🔄 [代码工作流程](docs/CODE_WORKFLOW.md) - 系统工作流程详解
 - 🛠️ [技术实施路线](docs/技术路线.md) - 技术方案和实现路径
 - 📋 [项目详细说明](docs/说明.md) - 完整的项目需求和规格
