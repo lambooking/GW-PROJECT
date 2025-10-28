@@ -615,17 +615,31 @@ class RAGScoringEngine:
         max_page = max(pages_conf) if pages_conf else 3
         
         # 过滤前3页图片
+        # 兼容DOCX文档：page_number=0的图片（旧数据）也纳入考虑，因为DOCX签字页可能未正确分配页码
         cover_images = [
             img for img in (document.images or [])
-            if isinstance(img.page_number, int) and img.page_number <= max_page
+            if isinstance(img.page_number, int) and (
+                1 <= img.page_number <= max_page or img.page_number == 0
+            )
         ]
         
-        logger.info(f"签字评分：文档共 {len(document.images)} 张图片")
-        logger.info(f"签字评分：前{max_page}页原始图片数: {len(cover_images)}")
+        logger.info(f"签字评分：文档类型={getattr(document.doc_info, 'file_type', 'unknown')}, 文档共 {len(document.images)} 张图片")
+        logger.info(f"签字评分：前{max_page}页原始图片数: {len(cover_images)} (包含page_number=0的图片)")
         
         # 按页码排序，同页内优先选择包含签字关键词的图片
         def get_image_priority(img):
             page = img.page_number
+            # 对于page_number=0的DOCX图片，使用image_id中的索引作为页码（如img_1视为第1页）
+            if page == 0:
+                image_id = getattr(img, 'image_id', '')
+                if 'img_' in image_id:
+                    try:
+                        page = int(image_id.split('_')[1])
+                    except (ValueError, IndexError):
+                        page = 99  # 未识别的放在后面
+                else:
+                    page = 99
+            
             # 优先级：签字关键词越多越高
             priority = 0
             ocr_text = (img.extracted_text or "").lower()

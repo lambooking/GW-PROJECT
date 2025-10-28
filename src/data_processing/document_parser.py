@@ -70,12 +70,13 @@ class DocumentParser:
             if "image" in rel.target_ref
         ]
         
-        for rel in image_rels:
+        for idx, rel in enumerate(image_rels):
             try:
                 image_data = rel.target_part.blob
                 images.append({
                     'data': image_data,
-                    'filename': rel.target_ref.split('/')[-1]
+                    'filename': rel.target_ref.split('/')[-1],
+                    'page_number': idx + 1  # 按提取顺序分配页码，前3张对应前3页（签字页常见位置）
                 })
             except Exception as e:
                 logger.warning(f"无法提取图片 '{rel.target_ref}': {e}")
