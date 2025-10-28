@@ -612,17 +612,29 @@ class RAGScoringEngine:
 
         # 1) 优选封面前3页的图片发送给多模态模型
         pages_conf = config.get("pages", [1, 2, 3])
-        # 过滤前3页图片
+        max_page = max(pages_conf) if pages_conf else 3
+        
+        # 过滤前3页图片，并按页码排序
         cover_images = [
             img for img in (document.images or [])
-            if isinstance(img.page_number, int) and img.page_number <= max(pages_conf)
+            if isinstance(img.page_number, int) and img.page_number <= max_page
         ]
+        # 按页码排序，确保顺序正确
+        cover_images.sort(key=lambda x: x.page_number)
+        
+        logger.info(f"签字评分：文档共 {len(document.images)} 张图片")
+        logger.info(f"签字评分：前{max_page}页共 {len(cover_images)} 张图片")
+        for idx, img in enumerate(cover_images[:10]):  # 只打印前10张
+            ocr_preview = (img.extracted_text or "")[:50]
+            logger.info(f"  图片{idx+1}: 第{img.page_number}页, OCR文本预览: {ocr_preview}...")
         
         # 如果前3页有图片，优先使用；否则使用全部图片
         if cover_images:
             images_to_send = [img.base64_data for img in cover_images[:5] if img.base64_data]
         else:
             images_to_send = self._select_images(document, config.get("image_keywords", []), limit=5)
+        
+        logger.info(f"签字评分：将发送 {len(images_to_send)} 张图片给多模态模型")
         
         if not images_to_send:
             return {
@@ -711,25 +723,45 @@ class RAGScoringEngine:
         
         logger.info(f"开始解析签字响应，原始响应长度：{len(response)}")
         
+        # 先尝试找"提取结果："部分（新格式）
+        extraction_section = ""
+        if "提取结果" in response or "提取结果：" in response:
+            parts = re.split(r"提取结果[：:]", response, maxsplit=1)
+            if len(parts) > 1:
+                extraction_section = parts[1].split("分数")[0] if "分数" in parts[1] else parts[1]
+                logger.info(f"找到'提取结果'部分，长度：{len(extraction_section)}")
+        else:
+            extraction_section = response
+        
         for role in roles:
             # 先查找明确的"未找到"标记
-            not_found_pattern = rf"{role}[：:\s]*[未]?找[不]?到"
-            if re.search(not_found_pattern, response, re.IGNORECASE):
-                logger.debug(f"{role}: 模型明确标记为未找到")
+            not_found_patterns = [
+                rf"{role}[：:\s]*未找到",
+                rf"{role}[：:\s]*[无]",
+                rf"{role}[：:\s]*None",
+            ]
+            is_not_found = any(re.search(pat, extraction_section, re.IGNORECASE) for pat in not_found_patterns)
+            
+            if is_not_found:
+                logger.debug(f"{role}: 模型标记为未找到")
                 continue
             
             # 查找该角色的信息（增强匹配，支持更多格式）
             # 格式1: 编制：张三，2024年7月24日
-            pattern1 = rf"{role}[：:\s]+([\u4e00-\u9fa5]{{2,4}})\s*[，,]\s*(20\d{{2}}[年/-]\d{{1,2}}[月/-]\d{{1,2}}[日]?)"
-            match1 = re.search(pattern1, response)
+            pattern1 = rf"{role}[：:\s]+([\u4e00-\u9fa5]{{2,4}})\s*[，,]\s*(20\d{{2}}[年\-./]?\d{{1,2}}[月\-./]?\d{{1,2}}[日]?)"
+            match1 = re.search(pattern1, extraction_section)
             
-            # 格式2: 编制：张三 (无日期)
-            pattern2 = rf"{role}[：:\s]+([\u4e00-\u9fa5]{{2,4}})(?:\s|$|，|。)"
-            match2 = re.search(pattern2, response)
+            # 格式2: 编制：张三，无
+            pattern2a = rf"{role}[：:\s]+([\u4e00-\u9fa5]{{2,4}})\s*[，,]\s*无"
+            match2a = re.search(pattern2a, extraction_section)
+            
+            # 格式2b: 编制：张三 (行尾或下一个角色前)
+            pattern2b = rf"{role}[：:\s]+([\u4e00-\u9fa5]{{2,4}})(?=\s*$|\s*\n|[，,])"
+            match2b = re.search(pattern2b, extraction_section)
             
             # 格式3: 编制：2024年7月24日 (仅日期)
-            pattern3 = rf"{role}[：:\s]+(20\d{{2}}[年/-]\d{{1,2}}[月/-]\d{{1,2}}[日]?)"
-            match3 = re.search(pattern3, response)
+            pattern3 = rf"{role}[：:\s]+(20\d{{2}}[年\-./]\d{{1,2}}[月\-./]\d{{1,2}}[日]?)"
+            match3 = re.search(pattern3, extraction_section)
             
             name = None
             date = None
@@ -738,11 +770,14 @@ class RAGScoringEngine:
                 name = match1.group(1)
                 date = match1.group(2)
                 logger.info(f"✓ {role}: 姓名={name}, 日期={date} (格式1)")
-            elif match2:
-                name = match2.group(1)
+            elif match2a:
+                name = match2a.group(1)
+                logger.info(f"✓ {role}: 姓名={name}, 日期=无 (格式2a)")
+            elif match2b:
+                name = match2b.group(1)
                 # 检查是否为常见的非姓名词汇
-                if name not in ["未找", "找到", "清晰", "图片", "页面", "签字", "盖章"]:
-                    logger.info(f"✓ {role}: 姓名={name} (格式2)")
+                if name not in ["未找", "找到", "清晰", "图片", "页面", "签字", "盖章", "表格", "栏位"]:
+                    logger.info(f"✓ {role}: 姓名={name} (格式2b)")
                 else:
                     continue
             elif match3:
