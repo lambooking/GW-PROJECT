@@ -74,9 +74,16 @@ class DocumentParser:
             # 检查段落中的图片
             if element.tag.endswith('p'):  # 段落
                 for run in element.findall('.//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}r'):
-                    for drawing in run.findall('.//{http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing}inline'):
-                        # 提取图片关系ID
+                    # 兼容 inline 与 anchor 两种嵌入方式
+                    for drawing in run.findall('.//{http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing}inline') + \
+                                   run.findall('.//{http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing}anchor'):
+                        # 提取图片关系ID（a:blip）
                         blip = drawing.find('.//{http://schemas.openxmlformats.org/drawingml/2006/main}blip')
+                        if blip is None:
+                            # 部分文档结构为 pic:pic/pic:blipFill/a:blip
+                            blip = drawing.find('.//{http://schemas.openxmlformats.org/drawingml/2006/picture}blipFill/')
+                        if blip is None:
+                            blip = drawing.find('.//{http://schemas.openxmlformats.org/drawingml/2006/main}blip')
                         if blip is not None:
                             embed_id = blip.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed')
                             if embed_id and embed_id not in seen_image_ids:
@@ -99,8 +106,13 @@ class DocumentParser:
             elif element.tag.endswith('tbl'):  # 表格
                 for cell in element.findall('.//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc'):
                     for run in cell.findall('.//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}r'):
-                        for drawing in run.findall('.//{http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing}inline'):
+                        for drawing in run.findall('.//{http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing}inline') + \
+                                       run.findall('.//{http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing}anchor'):
                             blip = drawing.find('.//{http://schemas.openxmlformats.org/drawingml/2006/main}blip')
+                            if blip is None:
+                                blip = drawing.find('.//{http://schemas.openxmlformats.org/drawingml/2006/picture}blipFill/')
+                            if blip is None:
+                                blip = drawing.find('.//{http://schemas.openxmlformats.org/drawingml/2006/main}blip')
                             if blip is not None:
                                 embed_id = blip.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed')
                                 if embed_id and embed_id not in seen_image_ids:
