@@ -613,7 +613,11 @@ class RAGScoringEngine:
         # 1) 优选封面前3页的图片发送给多模态模型
         pages_conf = config.get("pages", [1, 2, 3])
         max_page = max(pages_conf) if pages_conf else 3
-        
+
+        # 从文件名推断文档类型（需在使用前获取）
+        file_name = getattr(document.document_info, 'file_name', '')
+        file_type = 'docx' if file_name.lower().endswith('.docx') else ('pdf' if file_name.lower().endswith('.pdf') else 'unknown')
+
         # 过滤前3页图片；若为DOCX且页码缺失，按顺序取前N张，并用关键词重新排序
         all_images = list(document.images or [])
         is_docx = file_type == 'docx'
@@ -626,9 +630,6 @@ class RAGScoringEngine:
                 if isinstance(img.page_number, int) and 1 <= img.page_number <= max_page
             ]
         
-        # 从文件名推断文档类型
-        file_name = getattr(document.document_info, 'file_name', '')
-        file_type = 'docx' if file_name.lower().endswith('.docx') else ('pdf' if file_name.lower().endswith('.pdf') else 'unknown')
         logger.info(f"签字评分：文档类型={file_type}, 文档共 {len(document.images)} 张图片")
         logger.info(f"签字评分：前{max_page}页原始图片数: {len(cover_images)} (包含page_number=0的图片)")
         
