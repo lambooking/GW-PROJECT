@@ -31,15 +31,28 @@ class DocumentParser:
     def parse_docx(self, file_path: Path, max_images: int = None) -> Dict[str, Any]:
         """
         解析DOCX文件，提取文本、表格和图片。
+        
+        注意：此方法也兼容.doc格式（通过新架构的DocxDocumentParser）
 
         Args:
-            file_path: 指向DOCX文件的路径对象。
+            file_path: 指向DOCX或DOC文件的路径对象。
             max_images: 可选，最多提取的图片数量。None表示提取所有图片。
                        用于优化：如签字页只需前3张图片，设置max_images=3可大幅提升性能。
 
         Returns:
             一个包含原始解析数据的字典。
         """
+        # 检查文件类型，如果是.doc格式，使用新架构的解析器
+        if file_path.suffix.lower() == '.doc':
+            logger.info(f"检测到 .doc 格式，使用新架构的 DocxDocumentParser 处理")
+            from ..data.parsers.docx_parser import DocxDocumentParser
+            parser = DocxDocumentParser(enable_ocr=self.ocr is not None, enable_images=True)
+            standardized_doc = parser.parse(file_path)
+            
+            # 将新架构的StandardizedDocument转换为旧格式
+            return self._convert_standardized_to_legacy(standardized_doc)
+        
+        # .docx 格式继续使用原有逻辑
         doc = docx.Document(file_path)
         
         text_content = []
@@ -221,6 +234,67 @@ class DocumentParser:
             'images': images,
             'total_pages': total_pages,
             'file_type': 'docx'
+        }
+    
+    def _convert_standardized_to_legacy(self, standardized_doc) -> Dict[str, Any]:
+        """
+        将新架构的 StandardizedDocument 转换为旧格式的字典。
+        
+        Args:
+            standardized_doc: StandardizedDocument 对象
+            
+        Returns:
+            旧格式的字典
+        """
+        import base64
+        
+        # 转换文本内容
+        text_content = []
+        for text_obj in standardized_doc.text_content:
+            text_content.append({
+                'type': 'paragraph',
+                'content': text_obj.content,
+                'style': text_obj.section_type or 'Normal'
+            })
+        
+        # 转换表格
+        tables = []
+        for table_idx, table_obj in enumerate(standardized_doc.tables):
+            table_data = [table_obj.headers] if table_obj.headers else []
+            table_data.extend(table_obj.data)
+            tables.append({
+                'index': table_idx,
+                'data': table_data
+            })
+        
+        # 转换图片
+        images = []
+        for img_idx, img_obj in enumerate(standardized_doc.images):
+            # 将base64图片数据转换为bytes
+            try:
+                if img_obj.base64_data.startswith('data:image'):
+                    # 去掉 data:image/png;base64, 前缀
+                    base64_str = img_obj.base64_data.split(',', 1)[1]
+                else:
+                    base64_str = img_obj.base64_data
+                
+                image_bytes = base64.b64decode(base64_str)
+                
+                images.append({
+                    'data': image_bytes,
+                    'filename': f'image_{img_idx + 1}.png',
+                    'page_number': img_obj.page_number or (img_idx + 1),
+                    'embed_id': img_obj.image_id or f'img_{img_idx + 1}'
+                })
+            except Exception as e:
+                logger.warning(f"转换图片 {img_idx} 失败: {e}")
+        
+        return {
+            'text_content': text_content,
+            'tables': tables,
+            'images': images,
+            'total_pages': standardized_doc.document_info.total_pages,
+            'file_type': 'doc'
         }
 
     def extract_text_from_image(self, image_data: bytes) -> str:
