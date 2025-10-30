@@ -632,28 +632,33 @@ class RAGScoringEngine:
         
         logger.info(f"签字评分：文档类型={file_type}, 文档共 {len(document.images)} 张图片")
         logger.info(f"签字评分：前{max_page}页原始图片数: {len(cover_images)} (包含page_number=0的图片)")
+
+        # 先运行签字检测器：若检测到签字记录，则标记对应页为强优先
+        pages_with_signature = set()
+        try:
+            sig_records = self.signature_extractor.extract_signatures_from_cover_pages(document, max_pages=max_page)
+            pages_with_signature = {getattr(r, 'page', None) for r in sig_records if getattr(r, 'page', None)}
+            logger.info(f"签字评分：检测器识别到签字候选页：{sorted(list(pages_with_signature))}")
+        except Exception as e:
+            logger.warning(f"签字检测器执行失败，降级为启发式排序：{e}")
         
         # 按页码排序，同页内优先选择包含签字关键词的图片
         def get_image_priority(img):
-            # 页码优先（若可得），其次为关键词与整页快照
+            # 组合打分：页码（越小越好）+ 整页快照 + 签字关键词 + 检测器页Boost
             page = getattr(img, 'page_number', 99) or 99
-
-            # 优先级：签字关键词越多越高
-            priority = 0
             ocr_text = (img.extracted_text or "").lower()
             signature_keywords = ["编制", "审核", "批准", "校对", "签字", "签章", "盖章", "评审意见"]
             keyword_hits = sum(1 for kw in signature_keywords if kw in ocr_text)
-            
-            # 检查是否为整页快照（通过image_id或文件名判断）
             image_id = getattr(img, 'image_id', '')
-            is_full_page = '_full' in image_id or 'page_' in image_id
-            
-            if is_full_page:
-                priority = 1000 + keyword_hits * 10  # 整页快照最高优先级
-            else:
-                priority = keyword_hits * 100  # 关键词越多优先级越高
-            
-            return (-page, -priority)  # 负号使得页码小的在前，优先级高的在前
+            is_full_page = ('_full' in image_id) or ('page_' in image_id)
+
+            # 评分分解
+            score = 0.0
+            score += (1000.0 if is_full_page else 0.0)
+            score += keyword_hits * 120.0
+            score += (300.0 if page in pages_with_signature else 0.0)
+            # 页码作为tie-breaker
+            return (-page, -score)
         
         cover_images.sort(key=get_image_priority)
         
@@ -668,11 +673,20 @@ class RAGScoringEngine:
                 page_image_count[page] = count + 1
         
         logger.info(f"签字评分：过滤后保留 {len(filtered_images)} 张图片（每页最多2张）")
+        # 诊断日志：打印评分细目
         for idx, img in enumerate(filtered_images[:10]):
             ocr_preview = (img.extracted_text or "")[:80].replace("\n", " ")
             image_id = getattr(img, 'image_id', '')
-            is_full = "✓整页" if '_full' in image_id or 'page_' in image_id else ""
-            logger.info(f"  图{idx+1}: 第{img.page_number}页 {is_full} [{image_id}], OCR: {ocr_preview}...")
+            is_full = ('_full' in image_id) or ('page_' in image_id)
+            page = getattr(img, 'page_number', 99) or 99
+            ocr_text = (img.extracted_text or "").lower()
+            signature_keywords = ["编制", "审核", "批准", "校对", "签字", "签章", "盖章", "评审意见"]
+            keyword_hits = sum(1 for kw in signature_keywords if kw in ocr_text)
+            in_sig_page = page in pages_with_signature
+            comp_score = (1000.0 if is_full else 0.0) + keyword_hits * 120.0 + (300.0 if in_sig_page else 0.0)
+            logger.info(
+                f"  图{idx+1}: 第{page}页 [{'✓整页' if is_full else '部分'}], in_sig_page={in_sig_page}, hits={keyword_hits}, score={comp_score:.1f}, id={image_id}, OCR: {ocr_preview}..."
+            )
         
         # 如果前3页有图片，优先使用；否则使用全部图片
         if filtered_images:

@@ -132,6 +132,50 @@ class DocumentParser:
                                         logger.warning(f"提取表格图片 {embed_id} 失败: {e}")
         
         logger.info(f"DOCX图片提取完成：共 {image_counter} 张图片，按文档顺序排列")
+
+        # —— 为每张图片计算宽高并推断是否为整页扫描（便于后续签字页优先）
+        # 规则：
+        # 1) min(width,height) >= 1000 像素（清晰大图）
+        # 2) 纵横比接近A4竖版（w/h≈0.707，容差±0.15）
+        # 3) 或者面积为文档Top-2
+        try:
+            dims = []
+            for item in images:
+                data = item.get('data')
+                if not data:
+                    dims.append((0, 0, 0))
+                    continue
+                np_arr = np.frombuffer(data, np.uint8)
+                img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+                if img is None:
+                    dims.append((0, 0, 0))
+                    continue
+                h, w = img.shape[:2]
+                area = int(w) * int(h)
+                item['width_px'] = int(w)
+                item['height_px'] = int(h)
+                item['size_bytes'] = len(data)
+                dims.append((w, h, area))
+
+            # 依据面积排序，选取Top-2作为整页候选
+            areas = [a for (_, _, a) in dims]
+            top_areas = sorted(areas, reverse=True)[:2]
+
+            for idx, item in enumerate(images):
+                w, h, area = dims[idx]
+                is_full = False
+                if w > 0 and h > 0:
+                    ratio = (w / float(h)) if h else 0.0
+                    big_enough = min(w, h) >= 1000
+                    ratio_ok = abs(ratio - 0.707) <= 0.15 or abs((h / float(max(1, w))) - 0.707) <= 0.15
+                    top_area = area in top_areas
+                    if big_enough and ratio_ok:
+                        is_full = True
+                    elif top_area:
+                        is_full = True
+                item['is_full_page'] = bool(is_full)
+        except Exception as e:
+            logger.warning(f"DOCX图片尺寸与整页判断失败: {e}")
         
         # 计算页数（这是一个估算值，python-docx不直接提供页数）
         total_pages = 0
