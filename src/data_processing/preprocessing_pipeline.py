@@ -75,14 +75,20 @@ class PreprocessingPipeline:
         file_suffix = path.suffix.lower()
         
         # 1. 解析文档
-        if file_suffix == '.docx':
+        if file_suffix in ['.docx', '.doc']:
             # 注意：当前的DocumentParser会返回一个自定义字典
+            # .doc 格式使用 antiword 解析（不提取图片和表格）
+            # .docx 格式使用 python-docx 解析（可提取图片和表格）
+            
             # 针对风险管控方案（场景二）的优化：
             # 由于签字页图片只会在前3页出现，启用图片提取限制以大幅提升性能
             max_images = None
-            if self._is_likely_risk_management_doc(path.name):
+            if file_suffix == '.docx' and self._is_likely_risk_management_doc(path.name):
                 max_images = 3
                 logger.info(f"检测到疑似风险管控文档，启用签字页优化模式（仅提取前{max_images}张图片）")
+            
+            if file_suffix == '.doc':
+                logger.info(f"检测到 .doc 格式文件，使用 antiword 进行解析（注意：.doc格式不支持图片和表格提取）")
             
             raw_parsed_data = self.docx_parser.parse_docx(path, max_images=max_images)
         elif file_suffix == '.pdf':
