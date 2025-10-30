@@ -179,6 +179,84 @@ python run_complete_rag_scoring.py batch data/raw/
 - ✅ 常见问题排查和解决方案
 - ✅ 最佳实践和性能优化建议
 
+## 🗂️ 批量目录审核
+
+系统支持对整个目录树进行批量智能评分，自动处理多层级目录结构中的所有文档。
+
+### 🎯 核心特性
+
+- **递归目录扫描**: 自动识别所有子目录中的文档文件
+- **目录结构映射**: 输出目录完全保持输入目录结构
+- **多格式报告**: 为每个文档生成JSON和HTML详细报告
+- **分层级统计**: 提供总体和子目录级别的汇总分析
+- **可视化汇总**: 生成美观的HTML汇总报告，包含图表和统计
+
+### 🚀 快速使用
+
+```bash
+# 基本用法：批量评分整个目录
+python run_batch_rag_scoring.py <输入目录> [输出目录]
+
+# 示例：使用默认输出目录
+python run_batch_rag_scoring.py /path/to/documents
+
+# 示例：指定自定义输出目录
+python run_batch_rag_scoring.py /path/to/documents output/my_results
+```
+
+### 📂 目录结构示例
+
+**输入目录**:
+```
+提交训练集/
+├── 一区一案/
+│   ├── 文档1.docx
+│   ├── 文档2.pdf
+│   └── 文档3.docx
+└── 作业指导书/
+    ├── 文档4.pdf
+    └── 文档5.docx
+```
+
+**输出目录** (保持相同结构):
+```
+output/batch_rag_scoring/
+├── 一区一案/
+│   ├── 文档1_report_20250130_143022.json
+│   ├── 文档1_report_20250130_143022.html
+│   ├── 文档2_report_20250130_143155.json
+│   └── ...
+├── 作业指导书/
+│   ├── 文档4_report_20250130_143320.json
+│   └── ...
+├── batch_summary_20250130_143500.json    # JSON汇总报告
+├── batch_summary_20250130_143500.txt     # 文本汇总报告
+└── batch_summary_20250130_143500.html    # HTML汇总报告
+```
+
+### 📊 汇总报告内容
+
+批量评分完成后，系统会生成包含以下内容的汇总报告：
+
+- **总体统计**: 总文件数、成功率、平均分数、最高/最低分
+- **子目录统计**: 每个子文件夹的独立统计分析
+- **评分分布**: 分数段分布、等级分布
+- **处理详情**: 成功/失败清单、耗时分析
+- **可视化图表**: 子目录对比、分数分布、等级分布
+
+### 📖 详细文档
+
+完整的批量审核使用说明，请参阅：
+
+👉 **[批量审核使用指南 (BATCH_SCORING_GUIDE.md)](docs/BATCH_SCORING_GUIDE.md)**
+
+包含内容：
+- ✅ 详细的功能说明和使用步骤
+- ✅ 目录结构组织最佳实践
+- ✅ 汇总报告解读指南
+- ✅ 常见问题和故障排除
+- ✅ 高级用法和性能优化
+
 ## 📁 项目结构
 
 ```
@@ -221,6 +299,7 @@ GW-PROJECT/
 ### 详细文档
 - 📘 [重构架构说明](docs/README_NEW.md) - 模块化架构详细介绍
 - 📖 [使用指南](docs/USAGE_GUIDE.md) - 多格式文档评分完整使用指南 ⭐ **推荐阅读**
+- 🗂️ [批量审核指南](docs/BATCH_SCORING_GUIDE.md) - 批量目录审核完整使用指南 ⭐ **新功能**
 - 🔄 [代码工作流程](docs/CODE_WORKFLOW.md) - 系统工作流程详解
 - 🛠️ [技术实施路线](docs/技术路线.md) - 技术方案和实现路径
 - 📋 [项目详细说明](docs/说明.md) - 完整的项目需求和规格
@@ -228,11 +307,12 @@ GW-PROJECT/
 
 ### API接口
 
-RAG评分系统提供RESTful API接口：
+RAG评分系统提供多种评分入口：
 
 | 功能 | 入口文件 | 描述 |
 |------|----------|------|
-| 完整评分 | `run_complete_rag_scoring.py` | 主要评分入口 |
+| 完整评分 | `run_complete_rag_scoring.py` | 单文档评分主入口 |
+| 批量目录审核 | `run_batch_rag_scoring.py` | 批量目录评分入口 ⭐ **新增** |
 | 兼容模式 | `run_complete_rag_scoring_compat.py` | 兼容性入口 |
 | 快速评分 | `rag_scoring_system.py` | 重构版入口 |
 | CLI工具 | `ragcli` | 统一命令行界面 |
@@ -349,14 +429,22 @@ python run_complete_rag_scoring.py --batch ./documents/
 - 支持OCR和图像提取
 
 ### Q: 如何进行批量评分？
-**A**: 使用以下方式：
+**A**: 系统提供专门的批量目录审核功能：
 ```bash
+# 批量目录审核（推荐）- 保持目录结构
+python run_batch_rag_scoring.py /path/to/documents
+
+# 指定输出目录
+python run_batch_rag_scoring.py /path/to/documents output/my_results
+
 # CLI方式
 ./ragcli batch ./documents/ --output ./results/
 
-# Python脚本方式  
-python run_complete_rag_scoring.py --batch ./documents/
+# 批量评分单个目录中的所有PDF
+python run_complete_rag_scoring.py batch ./documents/
 ```
+
+详细使用说明请参阅 [批量审核指南](docs/BATCH_SCORING_GUIDE.md)
 
 ## 📄 许可证
 

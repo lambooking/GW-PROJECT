@@ -835,3 +835,726 @@ class HTMLReportGenerator:
         
         logger.info(f"批量转换完成，共生成 {len(generated_files)} 个HTML文件")
         return generated_files
+    
+    def generate_batch_summary_html(self, summary: Dict[str, Any], output_path: str) -> str:
+        """
+        生成批量汇总报告的HTML
+        
+        Args:
+            summary: 批量汇总数据
+            output_path: 输出HTML文件路径
+            
+        Returns:
+            生成的HTML文件路径
+        """
+        try:
+            logger.info(f"正在生成批量汇总HTML报告: {output_path}")
+            
+            # 生成HTML内容
+            html_content = self._generate_batch_summary_html_content(summary)
+            
+            # 写入文件
+            output_file = Path(output_path)
+            output_file.parent.mkdir(parents=True, exist_ok=True)
+            
+            with open(output_file, 'w', encoding='utf-8') as f:
+                f.write(html_content)
+            
+            logger.info(f"✅ 批量汇总HTML报告已生成: {output_file}")
+            return str(output_file)
+            
+        except Exception as e:
+            logger.error(f"❌ 批量汇总HTML报告生成失败: {e}")
+            raise
+    
+    def _generate_batch_summary_html_content(self, summary: Dict[str, Any]) -> str:
+        """生成批量汇总HTML内容"""
+        metadata = summary.get('metadata', {})
+        overall = summary.get('overall_stats', {})
+        subdirs = summary.get('subdirectory_stats', {})
+        score_dist = summary.get('score_distribution', {})
+        grade_dist = summary.get('grade_distribution', {})
+        timing = summary.get('timing_analysis', {})
+        failures = summary.get('failure_analysis', {})
+        
+        html = f"""
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>批量审核汇总报告</title>
+    <style>
+        {self._get_batch_summary_css()}
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="container">
+        {self._generate_batch_header(metadata)}
+        {self._generate_batch_overall_stats(overall)}
+        {self._generate_batch_subdirectory_stats(subdirs)}
+        {self._generate_batch_distributions(score_dist, grade_dist)}
+        {self._generate_batch_timing_analysis(timing)}
+        {self._generate_batch_failure_analysis(failures)}
+        {self._generate_batch_charts_section()}
+        {self._generate_batch_footer(metadata)}
+    </div>
+    
+    <script>
+        {self._generate_batch_charts_script(overall, subdirs, score_dist, grade_dist)}
+    </script>
+</body>
+</html>
+"""
+        return html
+    
+    def _get_batch_summary_css(self) -> str:
+        """批量汇总报告的CSS样式"""
+        return """
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Microsoft YaHei', 'PingFang SC', 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            min-height: 100vh;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 30px;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            text-align: center;
+            padding: 50px 30px;
+            border-radius: 15px;
+            margin-bottom: 40px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+        }
+        
+        .header h1 {
+            font-size: 3em;
+            margin-bottom: 15px;
+            font-weight: 300;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+        }
+        
+        .header .subtitle {
+            font-size: 1.3em;
+            opacity: 0.95;
+        }
+        
+        .header .metadata {
+            margin-top: 25px;
+            padding-top: 25px;
+            border-top: 1px solid rgba(255, 255, 255, 0.3);
+            font-size: 1em;
+        }
+        
+        .section {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+            margin-bottom: 30px;
+        }
+        
+        .section-title {
+            font-size: 1.8em;
+            color: #667eea;
+            margin-bottom: 25px;
+            padding-bottom: 15px;
+            border-bottom: 3px solid #667eea;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .stat-card {
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            padding: 25px;
+            border-radius: 10px;
+            text-align: center;
+            border-left: 5px solid #667eea;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        
+        .stat-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 20px rgba(102, 126, 234, 0.3);
+        }
+        
+        .stat-label {
+            font-size: 0.95em;
+            color: #6c757d;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        .stat-value {
+            font-size: 2.5em;
+            font-weight: bold;
+            color: #667eea;
+            margin-bottom: 5px;
+        }
+        
+        .stat-subtext {
+            font-size: 0.9em;
+            color: #495057;
+        }
+        
+        .success-rate {
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            color: white;
+            border-left-color: #28a745;
+        }
+        
+        .success-rate .stat-value {
+            color: white;
+        }
+        
+        .subdir-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 20px;
+        }
+        
+        .subdir-card {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+            border-left: 4px solid #764ba2;
+        }
+        
+        .subdir-name {
+            font-size: 1.3em;
+            font-weight: bold;
+            color: #495057;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .subdir-stats {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+        }
+        
+        .subdir-stat {
+            padding: 10px;
+            background: white;
+            border-radius: 5px;
+            font-size: 0.9em;
+        }
+        
+        .subdir-stat strong {
+            color: #667eea;
+            display: block;
+            margin-bottom: 3px;
+        }
+        
+        .distribution-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 30px;
+        }
+        
+        .distribution-item {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: background 0.2s ease;
+        }
+        
+        .distribution-item:hover {
+            background: #e9ecef;
+        }
+        
+        .distribution-label {
+            font-weight: 500;
+            color: #495057;
+        }
+        
+        .distribution-value {
+            font-size: 1.5em;
+            font-weight: bold;
+            color: #667eea;
+        }
+        
+        .timing-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+        
+        .timing-item {
+            text-align: center;
+            padding: 20px;
+            background: linear-gradient(135deg, #fff 0%, #f8f9fa 100%);
+            border-radius: 8px;
+            border: 2px solid #e9ecef;
+        }
+        
+        .timing-label {
+            font-size: 0.9em;
+            color: #6c757d;
+            margin-bottom: 8px;
+        }
+        
+        .timing-value {
+            font-size: 1.8em;
+            font-weight: bold;
+            color: #495057;
+        }
+        
+        .failure-list {
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 20px;
+            border-radius: 5px;
+            margin-top: 15px;
+        }
+        
+        .failure-type {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px;
+            background: white;
+            margin: 5px 0;
+            border-radius: 5px;
+        }
+        
+        .chart-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 30px;
+        }
+        
+        .chart-container {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+        
+        .chart-title {
+            font-size: 1.2em;
+            font-weight: bold;
+            color: #495057;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+        
+        .footer {
+            text-align: center;
+            padding: 40px 20px;
+            color: white;
+            margin-top: 50px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 12px;
+        }
+        
+        .footer p {
+            margin: 5px 0;
+        }
+        
+        @media (max-width: 768px) {
+            .container {
+                padding: 15px;
+            }
+            
+            .header h1 {
+                font-size: 2em;
+            }
+            
+            .stats-grid,
+            .subdir-grid,
+            .distribution-grid,
+            .chart-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        """
+    
+    def _generate_batch_header(self, metadata: Dict[str, Any]) -> str:
+        """生成批量报告头部"""
+        return f"""
+        <header class="header">
+            <h1>📊 批量审核汇总报告</h1>
+            <div class="subtitle">RAG智能评分系统 - 批量文档评估总结</div>
+            <div class="metadata">
+                <div>📁 输入目录: {metadata.get('input_directory', '未知')}</div>
+                <div>📁 输出目录: {metadata.get('output_directory', '未知')}</div>
+                <div>🕐 生成时间: {metadata.get('generated_at', '未知')}</div>
+            </div>
+        </header>
+        """
+    
+    def _generate_batch_overall_stats(self, overall: Dict[str, Any]) -> str:
+        """生成总体统计部分"""
+        success_rate = overall.get('success_rate', 0) * 100
+        
+        return f"""
+        <section class="section">
+            <h2 class="section-title">📈 总体统计</h2>
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-label">总文件数</div>
+                    <div class="stat-value">{overall.get('total_files', 0)}</div>
+                    <div class="stat-subtext">待评分文档</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">成功处理</div>
+                    <div class="stat-value" style="color: #28a745;">{overall.get('successful', 0)}</div>
+                    <div class="stat-subtext">✅ 评分完成</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">处理失败</div>
+                    <div class="stat-value" style="color: #dc3545;">{overall.get('failed', 0)}</div>
+                    <div class="stat-subtext">❌ 评分失败</div>
+                </div>
+                <div class="stat-card success-rate">
+                    <div class="stat-label">成功率</div>
+                    <div class="stat-value">{success_rate:.1f}%</div>
+                    <div class="stat-subtext">处理成功比例</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">平均分数</div>
+                    <div class="stat-value">{overall.get('average_score', 0):.1f}</div>
+                    <div class="stat-subtext">所有文档平均分</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">最高分数</div>
+                    <div class="stat-value" style="color: #ffc107;">{overall.get('max_score', 0):.1f}</div>
+                    <div class="stat-subtext">单个文档最高分</div>
+                </div>
+            </div>
+        </section>
+        """
+    
+    def _generate_batch_subdirectory_stats(self, subdirs: Dict[str, Dict[str, Any]]) -> str:
+        """生成子目录统计部分"""
+        if not subdirs:
+            return ""
+        
+        html = """
+        <section class="section">
+            <h2 class="section-title">📂 子目录统计</h2>
+            <div class="subdir-grid">
+        """
+        
+        for subdir_name, stats in subdirs.items():
+            success_rate = stats.get('success_rate', 0) * 100
+            html += f"""
+                <div class="subdir-card">
+                    <div class="subdir-name">📁 {subdir_name}</div>
+                    <div class="subdir-stats">
+                        <div class="subdir-stat">
+                            <strong>文件数</strong>
+                            {stats.get('total_files', 0)}
+                        </div>
+                        <div class="subdir-stat">
+                            <strong>成功数</strong>
+                            {stats.get('successful', 0)}
+                        </div>
+                        <div class="subdir-stat">
+                            <strong>平均分</strong>
+                            {stats.get('average_score', 0):.2f}
+                        </div>
+                        <div class="subdir-stat">
+                            <strong>成功率</strong>
+                            {success_rate:.1f}%
+                        </div>
+                    </div>
+                </div>
+            """
+        
+        html += """
+            </div>
+        </section>
+        """
+        return html
+    
+    def _generate_batch_distributions(self, score_dist: Dict[str, int], 
+                                     grade_dist: Dict[str, int]) -> str:
+        """生成分布统计部分"""
+        html = """
+        <section class="section">
+            <h2 class="section-title">📊 评分分布</h2>
+            <div class="distribution-grid">
+                <div>
+                    <h3 style="margin-bottom: 15px; color: #495057;">分数段分布</h3>
+        """
+        
+        for range_str, count in score_dist.items():
+            html += f"""
+                    <div class="distribution-item">
+                        <span class="distribution-label">{range_str} 分</span>
+                        <span class="distribution-value">{count}</span>
+                    </div>
+            """
+        
+        html += """
+                </div>
+                <div>
+                    <h3 style="margin-bottom: 15px; color: #495057;">等级分布</h3>
+        """
+        
+        for grade, count in grade_dist.items():
+            html += f"""
+                    <div class="distribution-item">
+                        <span class="distribution-label">{grade}</span>
+                        <span class="distribution-value">{count}</span>
+                    </div>
+            """
+        
+        html += """
+                </div>
+            </div>
+        </section>
+        """
+        return html
+    
+    def _generate_batch_timing_analysis(self, timing: Dict[str, Any]) -> str:
+        """生成耗时分析部分"""
+        return f"""
+        <section class="section">
+            <h2 class="section-title">⏱️ 处理耗时分析</h2>
+            <div class="timing-stats">
+                <div class="timing-item">
+                    <div class="timing-label">总耗时</div>
+                    <div class="timing-value">{timing.get('total_time', 0):.1f}s</div>
+                </div>
+                <div class="timing-item">
+                    <div class="timing-label">平均耗时</div>
+                    <div class="timing-value">{timing.get('average_time', 0):.1f}s</div>
+                </div>
+                <div class="timing-item">
+                    <div class="timing-label">最快</div>
+                    <div class="timing-value">{timing.get('min_time', 0):.1f}s</div>
+                </div>
+                <div class="timing-item">
+                    <div class="timing-label">最慢</div>
+                    <div class="timing-value">{timing.get('max_time', 0):.1f}s</div>
+                </div>
+                <div class="timing-item">
+                    <div class="timing-label">快速 (≤30s)</div>
+                    <div class="timing-value">{timing.get('fast_count', 0)}</div>
+                </div>
+                <div class="timing-item">
+                    <div class="timing-label">正常 (30-60s)</div>
+                    <div class="timing-value">{timing.get('normal_count', 0)}</div>
+                </div>
+                <div class="timing-item">
+                    <div class="timing-label">慢速 (>60s)</div>
+                    <div class="timing-value">{timing.get('slow_count', 0)}</div>
+                </div>
+            </div>
+        </section>
+        """
+    
+    def _generate_batch_failure_analysis(self, failures: Dict[str, Any]) -> str:
+        """生成失败分析部分"""
+        if failures.get('total_failures', 0) == 0:
+            return """
+        <section class="section">
+            <h2 class="section-title">✅ 处理结果</h2>
+            <div style="text-align: center; padding: 40px; color: #28a745;">
+                <h3>🎉 所有文档处理成功！</h3>
+                <p style="margin-top: 15px;">没有失败的文档</p>
+            </div>
+        </section>
+            """
+        
+        html = f"""
+        <section class="section">
+            <h2 class="section-title">⚠️ 失败分析</h2>
+            <div class="failure-list">
+                <h3 style="margin-bottom: 15px; color: #495057;">失败统计: {failures.get('total_failures', 0)} 个</h3>
+        """
+        
+        for error_type, count in failures.get('error_types', {}).items():
+            html += f"""
+                <div class="failure-type">
+                    <span>{error_type}</span>
+                    <span style="font-weight: bold; color: #dc3545;">{count} 个</span>
+                </div>
+            """
+        
+        html += """
+            </div>
+        </section>
+        """
+        return html
+    
+    def _generate_batch_charts_section(self) -> str:
+        """生成图表部分"""
+        return """
+        <section class="section">
+            <h2 class="section-title">📈 可视化分析</h2>
+            <div class="chart-grid">
+                <div class="chart-container">
+                    <div class="chart-title">子目录评分对比</div>
+                    <canvas id="subdirChart"></canvas>
+                </div>
+                <div class="chart-container">
+                    <div class="chart-title">分数段分布</div>
+                    <canvas id="scoreDistChart"></canvas>
+                </div>
+                <div class="chart-container">
+                    <div class="chart-title">等级分布</div>
+                    <canvas id="gradeDistChart"></canvas>
+                </div>
+            </div>
+        </section>
+        """
+    
+    def _generate_batch_charts_script(self, overall: Dict[str, Any],
+                                      subdirs: Dict[str, Dict[str, Any]],
+                                      score_dist: Dict[str, int],
+                                      grade_dist: Dict[str, int]) -> str:
+        """生成批量报告的图表脚本"""
+        # 准备子目录数据
+        subdir_labels = list(subdirs.keys())
+        subdir_scores = [stats.get('average_score', 0) for stats in subdirs.values()]
+        subdir_counts = [stats.get('total_files', 0) for stats in subdirs.values()]
+        
+        # 准备分数段数据
+        score_labels = list(score_dist.keys())
+        score_values = list(score_dist.values())
+        
+        # 准备等级数据
+        grade_labels = list(grade_dist.keys())
+        grade_values = list(grade_dist.values())
+        
+        return f"""
+        // 子目录评分对比图
+        if (document.getElementById('subdirChart')) {{
+            const subdirCtx = document.getElementById('subdirChart').getContext('2d');
+            new Chart(subdirCtx, {{
+                type: 'bar',
+                data: {{
+                    labels: {subdir_labels},
+                    datasets: [{{
+                        label: '平均分数',
+                        data: {subdir_scores},
+                        backgroundColor: 'rgba(102, 126, 234, 0.8)',
+                        borderColor: 'rgba(102, 126, 234, 1)',
+                        borderWidth: 2
+                    }}]
+                }},
+                options: {{
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    scales: {{
+                        y: {{
+                            beginAtZero: true,
+                            max: 100
+                        }}
+                    }},
+                    plugins: {{
+                        legend: {{
+                            display: false
+                        }}
+                    }}
+                }}
+            }});
+        }}
+        
+        // 分数段分布图
+        if (document.getElementById('scoreDistChart')) {{
+            const scoreDistCtx = document.getElementById('scoreDistChart').getContext('2d');
+            new Chart(scoreDistCtx, {{
+                type: 'pie',
+                data: {{
+                    labels: {score_labels},
+                    datasets: [{{
+                        data: {score_values},
+                        backgroundColor: [
+                            'rgba(76, 175, 80, 0.8)',
+                            'rgba(33, 150, 243, 0.8)',
+                            'rgba(255, 152, 0, 0.8)',
+                            'rgba(255, 193, 7, 0.8)',
+                            'rgba(244, 67, 54, 0.8)'
+                        ],
+                        borderWidth: 2,
+                        borderColor: '#fff'
+                    }}]
+                }},
+                options: {{
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {{
+                        legend: {{
+                            position: 'bottom'
+                        }}
+                    }}
+                }}
+            }});
+        }}
+        
+        // 等级分布图
+        if (document.getElementById('gradeDistChart')) {{
+            const gradeDistCtx = document.getElementById('gradeDistChart').getContext('2d');
+            new Chart(gradeDistCtx, {{
+                type: 'doughnut',
+                data: {{
+                    labels: {grade_labels},
+                    datasets: [{{
+                        data: {grade_values},
+                        backgroundColor: [
+                            'rgba(76, 175, 80, 0.8)',
+                            'rgba(33, 150, 243, 0.8)',
+                            'rgba(255, 152, 0, 0.8)',
+                            'rgba(255, 193, 7, 0.8)',
+                            'rgba(244, 67, 54, 0.8)'
+                        ],
+                        borderWidth: 2,
+                        borderColor: '#fff'
+                    }}]
+                }},
+                options: {{
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {{
+                        legend: {{
+                            position: 'bottom'
+                        }}
+                    }}
+                }}
+            }});
+        }}
+        """
+    
+    def _generate_batch_footer(self, metadata: Dict[str, Any]) -> str:
+        """生成批量报告底部"""
+        return f"""
+        <footer class="footer">
+            <p><strong>🤖 RAG智能评分系统 - 批量审核汇总</strong></p>
+            <p>基于检索增强生成技术的批量文档智能评估</p>
+            <p style="margin-top: 15px; opacity: 0.9;">报告生成时间: {metadata.get('generated_at', '未知')}</p>
+        </footer>
+        """
