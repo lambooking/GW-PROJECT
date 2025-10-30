@@ -36,6 +36,23 @@ class PreprocessingPipeline:
         self.classifier = DocumentClassifier()
         self.enable_enhanced_ocr = enable_enhanced_ocr
         # OCR引擎可以在解析器内部初始化，这里我们假设解析器自带OCR能力
+    
+    def _is_likely_risk_management_doc(self, filename: str) -> bool:
+        """
+        根据文件名启发式判断是否为风险管控文档（场景二）
+        
+        Args:
+            filename: 文件名
+            
+        Returns:
+            是否可能是风险管控文档
+        """
+        # 风险管控方案的关键词
+        risk_keywords = ['风险', '管控', '高后果', '高风险', '防护', '应急', '隐患']
+        filename_lower = filename.lower()
+        
+        # 检查文件名中是否包含风险管控相关关键词
+        return any(keyword in filename_lower for keyword in risk_keywords)
         
     def process(self, file_path: str) -> StandardizedDocument:
         """
@@ -60,7 +77,14 @@ class PreprocessingPipeline:
         # 1. 解析文档
         if file_suffix == '.docx':
             # 注意：当前的DocumentParser会返回一个自定义字典
-            raw_parsed_data = self.docx_parser.parse_docx(path)
+            # 针对风险管控方案（场景二）的优化：
+            # 由于签字页图片只会在前3页出现，启用图片提取限制以大幅提升性能
+            max_images = None
+            if self._is_likely_risk_management_doc(path.name):
+                max_images = 3
+                logger.info(f"检测到疑似风险管控文档，启用签字页优化模式（仅提取前{max_images}张图片）")
+            
+            raw_parsed_data = self.docx_parser.parse_docx(path, max_images=max_images)
         elif file_suffix == '.pdf':
             # EnhancedPDFParser返回一个更详细的字典
             raw_parsed_data = self.pdf_parser.parse_pdf_enhanced(path)

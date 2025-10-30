@@ -300,6 +300,7 @@ GW-PROJECT/
 - 📘 [重构架构说明](docs/README_NEW.md) - 模块化架构详细介绍
 - 📖 [使用指南](docs/USAGE_GUIDE.md) - 多格式文档评分完整使用指南 ⭐ **推荐阅读**
 - 🗂️ [批量审核指南](docs/BATCH_SCORING_GUIDE.md) - 批量目录审核完整使用指南 ⭐ **新功能**
+- 🖋️ [签字页优化说明](docs/SIGNATURE_OPTIMIZATION.md) - DOCX签字页处理性能优化 ⚡ **性能提升67%**
 - 🔄 [代码工作流程](docs/CODE_WORKFLOW.md) - 系统工作流程详解
 - 🛠️ [技术实施路线](docs/技术路线.md) - 技术方案和实现路径
 - 📋 [项目详细说明](docs/说明.md) - 完整的项目需求和规格

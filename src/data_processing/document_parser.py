@@ -28,12 +28,14 @@ class DocumentParser:
                 logger.error(f"PaddleOCR 初始化失败，已禁用OCR: {e}")
                 self.ocr = None
 
-    def parse_docx(self, file_path: Path) -> Dict[str, Any]:
+    def parse_docx(self, file_path: Path, max_images: int = None) -> Dict[str, Any]:
         """
         解析DOCX文件，提取文本、表格和图片。
 
         Args:
             file_path: 指向DOCX文件的路径对象。
+            max_images: 可选，最多提取的图片数量。None表示提取所有图片。
+                       用于优化：如签字页只需前3张图片，设置max_images=3可大幅提升性能。
 
         Returns:
             一个包含原始解析数据的字典。
@@ -69,8 +71,15 @@ class DocumentParser:
         image_counter = 0
         seen_image_ids = set()  # 用于去重
         
+        # 日志提示
+        if max_images is not None:
+            logger.info(f"DOCX图片提取：启用限制模式，最多提取前 {max_images} 张图片（用于签字页优化）")
+        
         # 遍历文档中的所有元素（段落和表格按文档顺序混合）
+        early_stop = False  # 标记是否提前停止
         for element in doc.element.body:
+            if early_stop:
+                break
             # 检查段落中的图片
             if element.tag.endswith('p'):  # 段落
                 for run in element.findall('.//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}r'):
@@ -99,6 +108,13 @@ class DocumentParser:
                                     })
                                     seen_image_ids.add(embed_id)
                                     logger.debug(f"提取图片 {image_counter}: {embed_id}")
+                                    
+                                    # 检查是否达到图片数量限制
+                                    if max_images is not None and image_counter >= max_images:
+                                        logger.info(f"已达到图片提取限制 ({max_images} 张)，停止提取")
+                                        early_stop = True
+                                        break
+                                        
                                 except Exception as e:
                                     logger.warning(f"提取图片 {embed_id} 失败: {e}")
             
@@ -128,8 +144,20 @@ class DocumentParser:
                                         })
                                         seen_image_ids.add(embed_id)
                                         logger.debug(f"提取表格中的图片 {image_counter}: {embed_id}")
+                                        
+                                        # 检查是否达到图片数量限制
+                                        if max_images is not None and image_counter >= max_images:
+                                            logger.info(f"已达到图片提取限制 ({max_images} 张)，停止提取")
+                                            early_stop = True
+                                            break
+                                            
                                     except Exception as e:
                                         logger.warning(f"提取表格图片 {embed_id} 失败: {e}")
+                            
+                            if early_stop:
+                                break
+                    if early_stop:
+                        break
         
         logger.info(f"DOCX图片提取完成：共 {image_counter} 张图片，按文档顺序排列")
 
