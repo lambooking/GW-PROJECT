@@ -7,6 +7,7 @@ import logging
 import subprocess
 import shutil
 import zipfile
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
@@ -32,6 +33,13 @@ if ANTIWORD_AVAILABLE:
     logger.info("antiword 命令可用，支持 .doc 文件解析")
 else:
     logger.warning("antiword 命令不可用，.doc 文件将无法解析（请安装: apt-get install antiword 或 yum install antiword）")
+
+# 检查 LibreOffice 是否可用（用于 .doc 转换的备选方案）
+LIBREOFFICE_AVAILABLE = shutil.which('libreoffice') is not None or shutil.which('soffice') is not None
+if LIBREOFFICE_AVAILABLE:
+    logger.info("LibreOffice 可用，可作为 .doc 文件转换的备选方案")
+else:
+    logger.info("LibreOffice 不可用，建议安装以增强 .doc 文件兼容性")
 
 
 class DocxDocumentParser(BaseDocumentParser):
@@ -66,6 +74,69 @@ class DocxDocumentParser(BaseDocumentParser):
         except Exception as e:
             logger.debug(f"检测文件格式时出错: {e}")
             return False
+    
+    def _convert_doc_to_docx_with_libreoffice(self, doc_path: Path) -> Optional[Path]:
+        """
+        使用 LibreOffice 将 .doc 文件转换为 .docx
+        
+        Args:
+            doc_path: .doc 文件路径
+            
+        Returns:
+            转换后的 .docx 文件路径，如果转换失败返回 None
+        """
+        if not LIBREOFFICE_AVAILABLE:
+            logger.warning("LibreOffice 不可用，无法自动转换 .doc 文件")
+            return None
+        
+        try:
+            # 创建临时目录用于存放转换后的文件
+            temp_dir = tempfile.mkdtemp(prefix='doc_convert_')
+            temp_dir_path = Path(temp_dir)
+            
+            logger.info(f"使用 LibreOffice 转换 .doc 文件: {doc_path.name}")
+            
+            # 确定 LibreOffice 命令
+            libreoffice_cmd = 'libreoffice' if shutil.which('libreoffice') else 'soffice'
+            
+            # 执行转换
+            result = subprocess.run(
+                [
+                    libreoffice_cmd,
+                    '--headless',
+                    '--convert-to', 'docx',
+                    '--outdir', str(temp_dir_path),
+                    str(doc_path)
+                ],
+                capture_output=True,
+                text=True,
+                timeout=120  # 2分钟超时
+            )
+            
+            if result.returncode != 0:
+                logger.error(f"LibreOffice 转换失败: {result.stderr}")
+                # 清理临时目录
+                shutil.rmtree(temp_dir_path, ignore_errors=True)
+                return None
+            
+            # 查找转换后的 .docx 文件
+            docx_filename = doc_path.stem + '.docx'
+            docx_path = temp_dir_path / docx_filename
+            
+            if not docx_path.exists():
+                logger.error(f"转换后的文件未找到: {docx_path}")
+                shutil.rmtree(temp_dir_path, ignore_errors=True)
+                return None
+            
+            logger.info(f"✅ 成功转换为 .docx: {docx_path}")
+            return docx_path
+            
+        except subprocess.TimeoutExpired:
+            logger.error(f"LibreOffice 转换超时: {doc_path}")
+            return None
+        except Exception as e:
+            logger.error(f"LibreOffice 转换出错: {e}")
+            return None
     
     def _parse_document(self, file_path: Path) -> StandardizedDocument:
         """Parse DOCX or DOC document."""
@@ -293,17 +364,68 @@ class DocxDocumentParser(BaseDocumentParser):
                 
                 # 检查是否是格式不支持的错误
                 if "is not a Word Document" in error_msg:
-                    raise DocumentProcessingError(
-                        f"无法解析 .doc 文件 '{file_path.name}'：antiword 无法识别该文件格式。\n\n"
-                        f"可能的原因：\n"
-                        f"1. 该文件不是真正的 Word .doc 格式\n"
-                        f"2. 该文件可能损坏\n"
-                        f"3. 该文件可能是其他格式（如 RTF、WPS 等）但扩展名为 .doc\n\n"
-                        f"建议解决方案：\n"
-                        f"1. 使用 Microsoft Word 或 WPS 打开该文件，然后另存为 .docx 格式\n"
-                        f"2. 检查文件是否完整、未损坏\n"
-                        f"3. 确认文件的真实格式是否为 Word .doc"
-                    )
+                    logger.warning(f"antiword 无法识别文件格式，尝试使用 LibreOffice 自动转换...")
+                    
+                    # 尝试使用 LibreOffice 自动转换
+                    converted_docx_path = self._convert_doc_to_docx_with_libreoffice(file_path)
+                    
+                    if converted_docx_path:
+                        try:
+                            # 使用转换后的 .docx 文件解析
+                            logger.info(f"使用转换后的 .docx 文件进行解析")
+                            doc = DocxDocument(converted_docx_path)
+                            
+                            # Extract document info
+                            document_info = self._extract_document_info(file_path, doc)  # 使用原文件名
+                            
+                            # Extract text content
+                            text_content = self._extract_text_content(doc)
+                            
+                            # Extract tables
+                            tables = self._extract_tables(doc)
+                            
+                            # Extract images if enabled  
+                            images = []
+                            if self.enable_images:
+                                images = self._extract_images(doc)
+                            
+                            result_doc = StandardizedDocument(
+                                document_info=document_info,
+                                text_content=text_content,
+                                tables=tables,
+                                images=images,
+                                raw_content=self._get_raw_text(text_content)
+                            )
+                            
+                            # 清理临时文件
+                            temp_dir = converted_docx_path.parent
+                            shutil.rmtree(temp_dir, ignore_errors=True)
+                            logger.info(f"✅ 成功通过 LibreOffice 转换解析 .doc 文件")
+                            
+                            return result_doc
+                            
+                        except Exception as e:
+                            # 清理临时文件
+                            temp_dir = converted_docx_path.parent
+                            shutil.rmtree(temp_dir, ignore_errors=True)
+                            raise DocumentProcessingError(
+                                f"转换后的 .docx 文件解析失败: {e}"
+                            )
+                    else:
+                        # LibreOffice 转换也失败了
+                        raise DocumentProcessingError(
+                            f"无法解析 .doc 文件 '{file_path.name}'：\n\n"
+                            f"❌ antiword 无法识别该文件格式\n"
+                            f"❌ LibreOffice 自动转换也失败\n\n"
+                            f"可能的原因：\n"
+                            f"1. 该文件不是标准的 Word .doc 格式\n"
+                            f"2. 该文件可能损坏\n"
+                            f"3. 该文件可能是其他格式（如 WPS 专有格式）\n\n"
+                            f"建议解决方案：\n"
+                            f"1. 手动使用 Microsoft Word 或 WPS 打开该文件\n"
+                            f"2. 另存为 .docx 格式\n"
+                            f"3. 使用转换后的 .docx 文件进行评分"
+                        )
                 else:
                     raise DocumentProcessingError(
                         f"antiword 执行失败: {error_msg}"
