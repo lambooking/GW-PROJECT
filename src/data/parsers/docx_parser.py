@@ -237,10 +237,14 @@ class DocxDocumentParser(BaseDocumentParser):
         """
         if not ANTIWORD_AVAILABLE:
             raise DocumentProcessingError(
-                f".doc 文件需要 antiword 工具支持。请安装: \n"
-                f"  Ubuntu/Debian: sudo apt-get install antiword\n"
-                f"  CentOS/RHEL: sudo yum install antiword\n"
-                f"或者将文件转换为 .docx 格式"
+                f"无法解析 .doc 文件 '{file_path.name}'，需要 antiword 工具支持。\n\n"
+                f"解决方案：\n"
+                f"  方案1（推荐）：将文件转换为 .docx 格式\n"
+                f"  方案2（Linux）：安装 antiword 工具\n"
+                f"    - Ubuntu/Debian: sudo apt-get install antiword\n"
+                f"    - CentOS/RHEL: sudo yum install antiword\n"
+                f"    - macOS: brew install antiword\n\n"
+                f"注意：antiword 只能提取文本，无法提取图片和表格，建议优先使用方案1。"
             )
         
         try:

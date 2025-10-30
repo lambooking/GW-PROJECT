@@ -35,7 +35,7 @@ class SmartImageSelector:
             document: 标准化文档
             criterion_key: 评分项键名
             criterion_config: 评分项配置
-            limit: 最多选择的图片数量
+            limit: 最多选择的图片数量（多模态问题会自动调整为至少3张）
             
         Returns:
             选中的图片base64列表
@@ -52,9 +52,16 @@ class SmartImageSelector:
         image_keywords = criterion_config.get("image_keywords", [])
         check_items = criterion_config.get("check_items", [])
         
+        # 智能判断是否为多模态问题，自动调整图片数量
+        is_multimodal = self._is_multimodal_criterion(criterion_type, criterion_config)
+        if is_multimodal and limit < 3:
+            original_limit = limit
+            limit = 3
+            logger.info(f"检测到多模态评分项，将图片数量从 {original_limit} 调整为 {limit}")
+        
         logger.info(f"为评分项 '{criterion_config.get('name', criterion_key)}' 选择图片")
-        logger.info(f"  类型: {criterion_type}, 评估重点: {evaluation_focus}")
-        logger.info(f"  关键词: {image_keywords}, 检查项: {check_items}")
+        logger.info(f"  类型: {criterion_type}, 多模态: {is_multimodal}, 评估重点: {evaluation_focus}")
+        logger.info(f"  图片限制: {limit}, 关键词: {image_keywords}")
         
         # 根据评分项选择策略
         if criterion_key == "signature_recognition" or "signature" in criterion_key.lower():
@@ -79,9 +86,20 @@ class SmartImageSelector:
         limit: int,
         config: Dict[str, Any]
     ) -> List[str]:
-        """选择签字页图片"""
+        """
+        选择签字页图片 - 针对比赛评分优化
+        
+        策略：
+        - 优先选择前3页（签字页通常在文档开头）
+        - 每页最多2张，确保覆盖不同签字区域
+        - 提高红色印章、表格线的权重
+        - 至少选择3张图片（如果可用）
+        """
         pages = config.get("pages", [1, 2, 3])
         max_page = max(pages) if pages else 3
+        
+        # 确保至少选择3张签字图片
+        effective_limit = max(limit, 3)
         
         scored_images = []
         
@@ -92,19 +110,30 @@ class SmartImageSelector:
             score = 0.0
             page = getattr(img, 'page_number', 99) or 99
             
-            # 1. 页码优先（前3页）
+            # 1. 页码优先（前3页） - 权重提升
             if isinstance(page, int) and 1 <= page <= max_page:
-                score += 1000.0
+                # 第1页优先级最高
+                if page == 1:
+                    score += 2000.0
+                elif page == 2:
+                    score += 1500.0
+                elif page == 3:
+                    score += 1200.0
+                else:
+                    score += 1000.0
             elif page <= max_page * 2:  # 放宽到前6页
-                score += 500.0
+                score += 300.0
             
-            # 2. OCR文本关键词匹配
+            # 2. OCR文本关键词匹配 - 增强匹配
             ocr_text = (img.extracted_text or "").lower()
-            signature_keywords = ["编制", "审核", "批准", "校对", "签字", "签章", "盖章", "评审意见", "签发"]
+            signature_keywords = [
+                "编制", "审核", "批准", "校对", "签字", "签章", 
+                "盖章", "评审意见", "签发", "签名", "确认"
+            ]
             keyword_hits = sum(1 for kw in signature_keywords if kw in ocr_text)
-            score += keyword_hits * 100.0
+            score += keyword_hits * 150.0  # 从100提升到150
             
-            # 3. 日期模式匹配
+            # 3. 日期模式匹配 - 增强权重
             date_patterns = [
                 r"\d{4}年\d{1,2}月\d{1,2}日",
                 r"\d{4}[-/]\d{1,2}[-/]\d{1,2}",
@@ -112,37 +141,56 @@ class SmartImageSelector:
             ]
             for pattern in date_patterns:
                 if re.search(pattern, ocr_text):
-                    score += 50.0
+                    score += 100.0  # 从50提升到100
                     break
             
-            # 4. 视觉特征（红色印章、表格线）
+            # 4. 视觉特征（红色印章、表格线） - 权重大幅提升
             visual_score = self._estimate_signature_visual_relevance(img.base64_data)
-            score += visual_score * 200.0
+            score += visual_score * 500.0  # 从200提升到500
             
-            # 5. 图片ID特征
+            # 5. 图片ID特征 - 全页图片优先
             image_id = getattr(img, 'image_id', '')
             if '_full' in image_id or 'page_' in image_id:
-                score += 100.0
+                score += 200.0  # 从100提升到200
             
-            scored_images.append((score, img))
+            # 6. 表格特征检测（签字页通常有表格）
+            if self._has_table_structure(img.base64_data):
+                score += 300.0
+            
+            scored_images.append((score, img, page))
         
         # 排序并选择
         scored_images.sort(key=lambda x: x[0], reverse=True)
         
-        # 每页最多2张
+        # 每页最多2张，确保覆盖前3页
         selected = []
         page_count = {}
-        for score, img in scored_images:
-            if len(selected) >= limit:
-                break
-            page = getattr(img, 'page_number', 99) or 99
-            count = page_count.get(page, 0)
-            if count < 2:
-                selected.append(img.base64_data)
-                page_count[page] = count + 1
-                logger.debug(f"选择签字图片: 第{page}页, 分数={score:.1f}")
+        pages_covered = set()
         
-        logger.info(f"签字图片选择完成: 从{len(images)}张中选择{len(selected)}张")
+        # 第一轮：优先确保前3页都有覆盖
+        for score, img, page in scored_images:
+            if len(pages_covered) >= 3:
+                break
+            if page <= 3 and page not in pages_covered:
+                selected.append(img.base64_data)
+                page_count[page] = 1
+                pages_covered.add(page)
+                logger.debug(f"选择签字图片（优先覆盖）: 第{page}页, 分数={score:.1f}")
+        
+        # 第二轮：填充到目标数量
+        for score, img, page in scored_images:
+            if len(selected) >= effective_limit:
+                break
+            count = page_count.get(page, 0)
+            # 每页最多2张
+            if count < 2:
+                # 避免重复
+                if img.base64_data not in selected:
+                    selected.append(img.base64_data)
+                    page_count[page] = count + 1
+                    logger.debug(f"选择签字图片（补充）: 第{page}页, 分数={score:.1f}")
+        
+        logger.info(f"签字图片选择完成: 从{len(images)}张中选择{len(selected)}张，覆盖页码: {sorted(pages_covered)}")
         return selected
     
     def _select_evacuation_route_images(
@@ -407,6 +455,52 @@ class SmartImageSelector:
         logger.info(f"关键词选择图片: 从{len(images)}张中选择{len(selected)}张")
         return selected
     
+    def _is_multimodal_criterion(self, criterion_type: str, criterion_config: Dict[str, Any]) -> bool:
+        """
+        判断评分项是否为多模态问题（需要图片）
+        
+        Args:
+            criterion_type: 评分项类型
+            criterion_config: 评分项配置
+            
+        Returns:
+            是否为多模态问题
+        """
+        # 1. 通过 type 字段判断
+        if criterion_type:
+            multimodal_types = [
+                "multimodal_signature",  # 签字识别
+                "multimodal_image",      # 影像图标注
+                "multimodal_route",      # 入场/逃生路线图
+                "multimodal_evacuation", # 疏散路线图
+                "multimodal_hca",        # 高后果区影像
+                "multimodal_risk",       # 风险标识
+                "multimodal_evac"        # 应急疏散
+            ]
+            if criterion_type in multimodal_types:
+                return True
+        
+        # 2. 通过 image_keywords 字段判断
+        image_keywords = criterion_config.get("image_keywords", [])
+        if image_keywords and len(image_keywords) > 0:
+            return True
+        
+        # 3. 通过评分项名称判断
+        name = criterion_config.get("name", "")
+        multimodal_keywords = [
+            "签字", "图片", "影像", "图标注", "路线图", 
+            "现场图", "示意图", "标识", "标注"
+        ]
+        if any(kw in name for kw in multimodal_keywords):
+            return True
+        
+        # 4. 通过 evaluation_focus 判断
+        focus = criterion_config.get("evaluation_focus", "")
+        if "图片" in focus or "识别" in focus or "标注" in focus:
+            return True
+        
+        return False
+    
     # ========== 辅助方法：图片特征检测 ==========
     
     def _is_map_like_image(self, image_base64: str) -> bool:
@@ -513,7 +607,14 @@ class SmartImageSelector:
         return False
     
     def _estimate_signature_visual_relevance(self, image_base64: str) -> float:
-        """估算图片与签字页的视觉相关性"""
+        """
+        估算图片与签字页的视觉相关性
+        
+        检测特征：
+        - 红色印章
+        - 表格线条
+        - 手写笔迹
+        """
         try:
             if image_base64.startswith("data:image"):
                 b64 = image_base64.split(",", 1)[-1]
@@ -531,7 +632,7 @@ class SmartImageSelector:
             if h == 0 or w == 0:
                 return 0.0
             
-            # 红色占比（印章）
+            # 1. 红色占比（印章） - 权重最高
             hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
             lower_red1 = np.array([0, 80, 80])
             upper_red1 = np.array([10, 255, 255])
@@ -541,16 +642,69 @@ class SmartImageSelector:
             mask2 = cv2.inRange(hsv, lower_red2, upper_red2)
             red_ratio = (np.count_nonzero(mask1) + np.count_nonzero(mask2)) / float(h * w)
             
-            # 线条密度（表格）
+            # 2. 线条密度（表格） - 权重提升
             gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
             edges = cv2.Canny(gray, 80, 180)
             lines = cv2.HoughLinesP(edges, 1, np.pi / 180, threshold=100, minLineLength=min(w, h) * 0.2, maxLineGap=10)
             line_count = 0 if lines is None else len(lines)
             line_density = min(1.0, line_count / 20.0)
             
-            score = red_ratio * 3.0 + line_density * 0.3
+            # 3. 深色笔迹检测（手写签名）
+            _, binary = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY_INV)
+            dark_ratio = np.count_nonzero(binary) / float(h * w)
+            # 手写签名通常占比在 0.05-0.20 之间
+            handwriting_score = 1.0 if 0.05 <= dark_ratio <= 0.20 else 0.0
+            
+            # 综合评分 - 红色印章权重5.0，表格线条权重1.0，手写笔迹权重0.5
+            score = red_ratio * 5.0 + line_density * 1.0 + handwriting_score * 0.5
             return min(1.0, score)
             
         except Exception:
             return 0.0
+    
+    def _has_table_structure(self, image_base64: str) -> bool:
+        """
+        检测图片中是否有表格结构
+        
+        Returns:
+            是否包含表格结构
+        """
+        try:
+            if image_base64.startswith("data:image"):
+                b64 = image_base64.split(",", 1)[-1]
+            else:
+                b64 = image_base64
+            
+            img_bytes = base64.b64decode(b64)
+            np_arr = np.frombuffer(img_bytes, np.uint8)
+            img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+            
+            if img is None:
+                return False
+            
+            h, w = img.shape[:2]
+            if h == 0 or w == 0:
+                return False
+            
+            # 检测水平和垂直线条
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            edges = cv2.Canny(gray, 50, 150)
+            
+            # 检测水平线
+            horizontal_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (min(w//10, 40), 1))
+            horizontal_lines = cv2.morphologyEx(edges, cv2.MORPH_OPEN, horizontal_kernel)
+            h_lines = np.count_nonzero(horizontal_lines)
+            
+            # 检测垂直线
+            vertical_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, min(h//10, 40)))
+            vertical_lines = cv2.morphologyEx(edges, cv2.MORPH_OPEN, vertical_kernel)
+            v_lines = np.count_nonzero(vertical_lines)
+            
+            # 如果同时有足够的水平线和垂直线，可能是表格
+            has_table = h_lines > 100 and v_lines > 100
+            
+            return has_table
+            
+        except Exception:
+            return False
 

@@ -19,6 +19,10 @@ from .prompts import ScoringPrompts
 from .signature_extractor import SignatureExtractor
 from .smart_image_selector import SmartImageSelector
 from ..data_processing.schemas import StandardizedDocument
+from ...config.competition_scoring_config import (
+    COMPETITION_SCORING_CRITERIA_SCENE1,
+    COMPETITION_SCORING_CRITERIA_SCENE2
+)
 
 logger = logging.getLogger(__name__)
 
@@ -37,137 +41,13 @@ class RAGScoringEngine:
         self.image_selector = SmartImageSelector()
 
         
-        # 场景一评分项配置（文本为主）
-        self.scoring_criteria_scene1 = {
-            "structure_completeness": {
-                "name": "结构完整性",
-                "weight": 0.2,
-                "max_score": 20,
-                "search_queries": [
-                    "1 范围",
-                    "2 职责", 
-                    "3 作业内容",
-                    "4 相关文件",
-                    "5 记录文件"
-                ],
-                "context_length": 1500,
-                "min_score_threshold": 0.2
-            },
-            "content_completeness": {
-                "name": "内容完整性", 
-                "weight": 0.3,
-                "max_score": 30,
-                "search_queries": [
-                    "作业内容 操作步骤 具体要求",
-                    "职责分工 责任划分 岗位职责",
-                    "工作流程 操作指导 实施方法"
-                ],
-                "context_length": 2000,
-                "min_score_threshold": 0.3
-            },
-            "technical_accuracy": {
-                "name": "技术准确性",
-                "weight": 0.25,
-                "max_score": 25,
-                "search_queries": [
-                    "表头 管径 材质 壁厚",
-                    "1016 X70 操作压力",
-                    "813 X60 允许悬空",
-                    "技术规范 设计 标准",
-                    "MPa 管线名称 长度"
-                ],
-                "context_length": 1800,
-                "min_score_threshold": 0.2
-            },
-            "safety_compliance": {
-                "name": "安全合规性",
-                "weight": 0.15,
-                "max_score": 15,
-                "search_queries": [
-                    "安全要求 风险控制 应急处置",
-                    "防护措施 安全隐患 风险识别",
-                    "应急预案 安全管理 防范措施 汛情"
-                ],
-                "context_length": 1500,
-                "min_score_threshold": 0.25
-            },
-            "grammar_quality": {
-                "name": "语法规范性",
-                "weight": 0.1,
-                "max_score": 10,
-                "search_queries": [
-                    "第1页 第2页 第3页",
-                    "内容 文字 描述 表达",
-                    "管道 汛期 防汛"  # 获取有实际内容的文本样本
-                ],
-                "context_length": 1200,
-                "min_score_threshold": 0.2
-            }
-        }
+        # 场景一评分项配置（文本为主）- 使用比赛方对齐的评分细则
+        # 包含5个评分项，与比赛方要求完全对齐
+        self.scoring_criteria_scene1 = COMPETITION_SCORING_CRITERIA_SCENE1
         
-        # 场景二评分项配置（多模态为主）
-        self.scoring_criteria_scene2 = {
-            "route_map_quality": {
-                "name": "路线图完整性与清晰度",
-                "weight": 0.2,
-                "max_score": 20,
-                "search_queries": [
-                    "入场线路", "疏散路线", "逃生路线", "集合点"
-                ],
-                "context_length": 1200,
-                "image_keywords": ["线路", "路线", "疏散", "逃生", "集合点", "路线图"],
-                "type": "multimodal_route"
-            },
-            "hca_coverage": {
-                "name": "HCA影像覆盖与风险标注",
-                "weight": 0.25,
-                "max_score": 25,
-                "search_queries": [
-                    "高后果区", "HCA", "人员密集", "环境敏感", "潜在影响半径"
-                ],
-                "context_length": 1500,
-                "image_keywords": ["HCA", "影像", "示意", "范围", "边界", "敏感"],
-                "type": "multimodal_hca"
-            },
-            "risk_signage": {
-                "name": "风险提示与管控标识",
-                "weight": 0.25,
-                "max_score": 25,
-                "search_queries": [
-                    "风险提示", "警示", "围挡", "隔离", "防护措施"
-                ],
-                "context_length": 1200,
-                "image_keywords": ["警示", "标识", "围挡", "隔离", "防护", "危险"],
-                "type": "multimodal_risk"
-            },
-            "signature_completeness": {
-                "name": "签字盖章完整性",
-                "weight": 0.15,
-                "max_score": 15,
-                "search_queries": [
-                    "签字", "签章", "批准", "审核", "编制", "评审意见", "签发意见", "日期"
-                ],
-                "context_length": 800,
-                "pages": [1, 2, 3],
-                "image_keywords": [
-                    "签字", "签章", "签名", "盖章", "签字页",
-                    "编制", "审核", "批准", "评审意见", "签发意见",
-                    "年", "月", "日", "校对", "评审组长", "单位"
-                ],
-                "type": "multimodal_signature"
-            },
-            "emergency_evac": {
-                "name": "应急疏散可操作性",
-                "weight": 0.15,
-                "max_score": 15,
-                "search_queries": [
-                    "应急疏散", "集合点", "通道", "疏散路线"
-                ],
-                "context_length": 1200,
-                "image_keywords": ["疏散", "集合点", "通道", "逃生", "路线"],
-                "type": "multimodal_evac"
-            }
-        }
+        # 场景二评分项配置（多模态为主）- 使用比赛方对齐的评分细则
+        # 包含12个评分项，与比赛方要求完全对齐
+        self.scoring_criteria_scene2 = COMPETITION_SCORING_CRITERIA_SCENE2
     
     def score_document(self, document: StandardizedDocument) -> Dict[str, Any]:
         """对文档进行全面评分"""
