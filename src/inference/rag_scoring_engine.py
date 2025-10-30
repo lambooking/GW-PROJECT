@@ -17,6 +17,7 @@ from .rag_knowledge_base import RAGKnowledgeBase
 from .vllm_client import VLLMInferenceClient
 from .prompts import ScoringPrompts
 from .signature_extractor import SignatureExtractor
+from .smart_image_selector import SmartImageSelector
 from ..data_processing.schemas import StandardizedDocument
 
 logger = logging.getLogger(__name__)
@@ -32,6 +33,8 @@ class RAGScoringEngine:
         self.scoring_prompts = ScoringPrompts()
         # 封面签字抽取器（仅用于场景二签字评分）
         self.signature_extractor = SignatureExtractor()
+        # 智能图片选择器
+        self.image_selector = SmartImageSelector()
 
         
         # 场景一评分项配置（文本为主）
@@ -273,7 +276,31 @@ class RAGScoringEngine:
         
         # 2. 调用对应的评分方法
         try:
-            if criterion_key == "structure_completeness":
+            # 基于评分项键名或类型判断
+            criterion_type = config.get("type", "")
+            
+            # 先根据键名判断（优先级最高）
+            if criterion_key == "evacuation_route_annotation" or "evacuation" in criterion_key.lower():
+                result = self._score_emergency_evac_multimodal(document, relevant_context, max_score, config)
+            elif criterion_key == "entry_route_annotation" or "entry_route" in criterion_key.lower():
+                result = self._score_route_map_multimodal(document, relevant_context, max_score, config)
+            elif criterion_key == "image_annotation_recognition" or "image_annotation" in criterion_key.lower():
+                result = self._score_hca_multimodal(document, relevant_context, max_score, config)
+            elif criterion_key == "signature_recognition" or "signature" in criterion_key.lower():
+                result = self._score_signature_multimodal(document, relevant_context, max_score, config)
+            # 再根据类型判断
+            elif criterion_type == "multimodal_route" or criterion_type == "multimodal_route":
+                result = self._score_route_map_multimodal(document, relevant_context, max_score, config)
+            elif criterion_type == "multimodal_signature":
+                result = self._score_signature_multimodal(document, relevant_context, max_score, config)
+            elif criterion_type == "multimodal_hca" or criterion_type == "multimodal_image":
+                result = self._score_hca_multimodal(document, relevant_context, max_score, config)
+            elif criterion_type == "multimodal_risk":
+                result = self._score_risk_signage_multimodal(document, relevant_context, max_score, config)
+            elif criterion_type == "multimodal_evac" or criterion_type == "multimodal_evacuation":
+                result = self._score_emergency_evac_multimodal(document, relevant_context, max_score, config)
+            # 文本类评分项
+            elif criterion_key == "structure_completeness":
                 result = self._score_structure_with_context(relevant_context, max_score)
             elif criterion_key == "content_completeness":
                 result = self._score_content_with_context(relevant_context, max_score)
@@ -281,18 +308,8 @@ class RAGScoringEngine:
                 result = self._score_technical_with_context(relevant_context, max_score)
             elif criterion_key == "safety_compliance":
                 result = self._score_safety_with_context(relevant_context, max_score)
-            elif criterion_key == "grammar_quality":
+            elif criterion_key == "grammar_quality" or "grammar" in criterion_key.lower():
                 result = self._score_grammar_with_context(relevant_context, max_score)
-            elif config.get("type") == "multimodal_route":
-                result = self._score_route_map_multimodal(document, relevant_context, max_score, config)
-            elif config.get("type") == "multimodal_signature":
-                result = self._score_signature_multimodal(document, relevant_context, max_score, config)
-            elif config.get("type") == "multimodal_hca":
-                result = self._score_hca_multimodal(document, relevant_context, max_score, config)
-            elif config.get("type") == "multimodal_risk":
-                result = self._score_risk_signage_multimodal(document, relevant_context, max_score, config)
-            elif config.get("type") == "multimodal_evac":
-                result = self._score_emergency_evac_multimodal(document, relevant_context, max_score, config)
             else:
                 result = self._score_general_with_context(relevant_context, max_score, criterion_name)
             
@@ -593,7 +610,10 @@ class RAGScoringEngine:
 
 
     def _score_route_map_multimodal(self, document: StandardizedDocument, context: str, max_score: int, config: Dict[str, Any]) -> Dict[str, Any]:
-        images = self._select_images(document, config.get("image_keywords", []), limit=3)
+        # 使用智能图片选择器，精准选择入场线路图
+        images = self.image_selector.select_images_for_criterion(
+            document, "entry_route_annotation", config, limit=3
+        )
         if not images:
             return {"score": 0, "reasoning": "未找到与路线相关的图片", "evaluation_focus": "入场/疏散路线图质量", "images_used": [], "images_count": 0, "total_images_in_document": len(document.images)}
         prompt = self.scoring_prompts.get_route_map_evaluation_prompt(context, max_score)
@@ -865,7 +885,10 @@ class RAGScoringEngine:
             return None
 
     def _score_hca_multimodal(self, document: StandardizedDocument, context: str, max_score: int, config: Dict[str, Any]) -> Dict[str, Any]:
-        images = self._select_images(document, config.get("image_keywords", []), limit=3)
+        # 使用智能图片选择器，精准选择高后果区影像图
+        images = self.image_selector.select_images_for_criterion(
+            document, "image_annotation_recognition", config, limit=3
+        )
         if not images:
             return {"score": 0, "reasoning": "未找到HCA影像/示意图", "evaluation_focus": "HCA关键区域覆盖与风险标注", "images_used": [], "images_count": 0, "total_images_in_document": len(document.images)}
         prompt = self.scoring_prompts.get_hca_image_analysis_prompt(context, max_score)
@@ -874,7 +897,10 @@ class RAGScoringEngine:
         return {"score": score, "reasoning": reasoning, "evaluation_focus": "HCA覆盖范围与风险点标注充分性", "images_used": images, "images_count": len(images), "total_images_in_document": len(document.images)}
 
     def _score_risk_signage_multimodal(self, document: StandardizedDocument, context: str, max_score: int, config: Dict[str, Any]) -> Dict[str, Any]:
-        images = self._select_images(document, config.get("image_keywords", []), limit=3)
+        # 使用智能图片选择器，精准选择风险标识相关图片
+        images = self.image_selector.select_images_for_criterion(
+            document, "risk_signage", config, limit=3
+        )
         if not images:
             return {"score": 0, "reasoning": "未找到风险提示/标识相关图片", "evaluation_focus": "现场风险提示与管控标识", "images_used": [], "images_count": 0, "total_images_in_document": len(document.images)}
         prompt = self.scoring_prompts.get_risk_controls_visual_prompt(context, max_score)
@@ -883,7 +909,10 @@ class RAGScoringEngine:
         return {"score": score, "reasoning": reasoning, "evaluation_focus": "风险提示与防护标识的可见性与规范性", "images_used": images, "images_count": len(images), "total_images_in_document": len(document.images)}
 
     def _score_emergency_evac_multimodal(self, document: StandardizedDocument, context: str, max_score: int, config: Dict[str, Any]) -> Dict[str, Any]:
-        images = self._select_images(document, config.get("image_keywords", []), limit=3)
+        # 使用智能图片选择器，精准选择应急疏散路线图
+        images = self.image_selector.select_images_for_criterion(
+            document, "evacuation_route_annotation", config, limit=3
+        )
         if not images:
             return {"score": 0, "reasoning": "未找到应急疏散/集合点相关图片", "evaluation_focus": "应急疏散图文一致性", "images_used": [], "images_count": 0, "total_images_in_document": len(document.images)}
         prompt = self.scoring_prompts.get_emergency_evac_plan_prompt(context, max_score)
