@@ -6,6 +6,7 @@ import base64
 import logging
 import subprocess
 import shutil
+import zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
@@ -47,14 +48,43 @@ class DocxDocumentParser(BaseDocumentParser):
         """Check if parser supports DOCX format."""
         return file_path.suffix.lower() in ['.docx', '.doc']
     
+    def _is_zip_file(self, file_path: Path) -> bool:
+        """
+        检测文件是否为 ZIP 格式（.docx 实际上是 ZIP 压缩包）
+        
+        Args:
+            file_path: 文件路径
+            
+        Returns:
+            True 如果文件是 ZIP 格式，False 否则
+        """
+        try:
+            with open(file_path, 'rb') as f:
+                # ZIP 文件的魔数是 PK (0x504B)
+                magic = f.read(2)
+                return magic == b'PK'
+        except Exception as e:
+            logger.debug(f"检测文件格式时出错: {e}")
+            return False
+    
     def _parse_document(self, file_path: Path) -> StandardizedDocument:
         """Parse DOCX or DOC document."""
         self._validate_file_size(file_path)
         
-        # 检查文件扩展名，对 .doc 文件使用 antiword
-        if file_path.suffix.lower() == '.doc':
+        # 智能文件格式检测
+        is_zip_format = self._is_zip_file(file_path)
+        file_suffix = file_path.suffix.lower()
+        
+        # 情况1: .doc 后缀但实际是 ZIP 格式（错误的扩展名，实际是 .docx）
+        if file_suffix == '.doc' and is_zip_format:
+            logger.warning(f"文件 {file_path.name} 后缀为 .doc 但实际是 .docx 格式，将使用 python-docx 解析")
+            # 继续使用 python-docx 解析
+        
+        # 情况2: .doc 后缀且不是 ZIP 格式（真正的旧版 .doc）
+        elif file_suffix == '.doc' and not is_zip_format:
             return self._parse_doc_with_antiword(file_path)
         
+        # 情况3: .docx 后缀或检测为 ZIP 格式
         # 对 .docx 文件使用 python-docx
         try:
             doc = DocxDocument(file_path)
@@ -259,9 +289,25 @@ class DocxDocumentParser(BaseDocumentParser):
             )
             
             if result.returncode != 0:
-                raise DocumentProcessingError(
-                    f"antiword 执行失败: {result.stderr}"
-                )
+                error_msg = result.stderr.strip()
+                
+                # 检查是否是格式不支持的错误
+                if "is not a Word Document" in error_msg:
+                    raise DocumentProcessingError(
+                        f"无法解析 .doc 文件 '{file_path.name}'：antiword 无法识别该文件格式。\n\n"
+                        f"可能的原因：\n"
+                        f"1. 该文件不是真正的 Word .doc 格式\n"
+                        f"2. 该文件可能损坏\n"
+                        f"3. 该文件可能是其他格式（如 RTF、WPS 等）但扩展名为 .doc\n\n"
+                        f"建议解决方案：\n"
+                        f"1. 使用 Microsoft Word 或 WPS 打开该文件，然后另存为 .docx 格式\n"
+                        f"2. 检查文件是否完整、未损坏\n"
+                        f"3. 确认文件的真实格式是否为 Word .doc"
+                    )
+                else:
+                    raise DocumentProcessingError(
+                        f"antiword 执行失败: {error_msg}"
+                    )
             
             raw_text = result.stdout
             
