@@ -19,7 +19,9 @@ from .prompts import ScoringPrompts
 from .signature_extractor import SignatureExtractor
 from .smart_image_selector import SmartImageSelector
 from ..data_processing.schemas import StandardizedDocument
-from ...config.competition_scoring_config import (
+
+# 使用绝对导入获取比赛评分配置
+from config.competition_scoring_config import (
     COMPETITION_SCORING_CRITERIA_SCENE1,
     COMPETITION_SCORING_CRITERIA_SCENE2
 )
