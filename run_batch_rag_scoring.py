@@ -211,15 +211,25 @@ class BatchRAGScoringSystem:
                 logger.info(f"✅ [{i}/{len(file_list)}] 评分完成")
                 
             except Exception as e:
-                logger.error(f"❌ [{i}/{len(file_list)}] 评分失败: {e}")
-                import traceback
-                traceback.print_exc()
+                error_msg = str(e)
+                logger.error(f"❌ [{i}/{len(file_list)}] 评分失败: {error_msg}")
+                
+                # 针对常见错误给出友好提示
+                if "DOCX文件格式错误" in error_msg or "not a zip file" in error_msg:
+                    logger.warning(f"⚠️  提示: 文件 {relative_path} 虽然扩展名是.docx，但不是有效的Office文档格式")
+                    logger.warning(f"   可能原因: 文件损坏、格式转换错误、或非标准DOCX格式")
+                    logger.warning(f"   建议: 用Microsoft Word打开并重新保存该文件")
+                
+                # 只在调试模式显示详细堆栈
+                if logger.level <= logging.DEBUG:
+                    import traceback
+                    traceback.print_exc()
                 
                 results.append({
                     'file_path': file_path,
                     'relative_path': relative_path,
                     'success': False,
-                    'error': str(e)
+                    'error': error_msg
                 })
         
         # 3. 生成汇总报告
@@ -278,8 +288,19 @@ class BatchRAGScoringSystem:
         
         # 1. 预处理文档
         logger.info("🔄 正在预处理文档...")
-        document = self.pipeline.process(file_path)
-        logger.info(f"✅ 文档预处理完成: {len(document.text_content)} 个文本段落, {len(document.tables)} 个表格")
+        try:
+            document = self.pipeline.process(file_path)
+            logger.info(f"✅ 文档预处理完成: {len(document.text_content)} 个文本段落, {len(document.tables)} 个表格")
+        except Exception as e:
+            error_msg = str(e)
+            if "not a zip file" in error_msg.lower():
+                raise ValueError(f"DOCX文件格式错误或已损坏: {Path(file_path).name}。"
+                               f"该文件虽然扩展名为.docx，但不是有效的Office文档格式。"
+                               f"请检查文件是否完整或尝试用Word重新保存。")
+            elif "file not found" in error_msg.lower():
+                raise FileNotFoundError(f"文件不存在或无法访问: {file_path}")
+            else:
+                raise Exception(f"文档预处理失败: {error_msg}")
         
         # 2. 执行RAG评分
         logger.info("⚖️  开始RAG智能评分...")
